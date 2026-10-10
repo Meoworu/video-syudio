@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 
 from app.config import Settings, get_settings
 from app.domain.models import CreateProjectRequest, Project
 from app.services.director_service import DirectorService
+from app.services.video_service import VideoService
 from app.store.project_store import ProjectStore
 
 
@@ -62,4 +63,23 @@ async def upload_frame(
     setattr(shot.uploads, f"{role}Frame", str(path.relative_to(store.project_dir(project_id))))
     store.save(project)
     return {"projectId": project_id, "shotId": shot_id, "role": role, "path": str(path)}
+
+
+@router.post("/{project_id}/shots/{shot_id}/generate-video", response_model=Project)
+def generate_video(
+    project_id: str,
+    shot_id: str,
+    background_tasks: BackgroundTasks,
+    settings: Settings = Depends(get_settings),
+    store: ProjectStore = Depends(get_store),
+) -> Project:
+    project = get_project(project_id, store)
+    shot = next((item for item in project.shots if item.id == shot_id), None)
+    if shot is None:
+        raise HTTPException(status_code=404, detail="镜头不存在")
+    if not shot.uploads.firstFrame or not shot.uploads.lastFrame:
+        raise HTTPException(status_code=400, detail="请先上传首帧和尾帧")
+    VideoService(settings, store).mark_submitting(project, shot)
+    background_tasks.add_task(VideoService(settings, store).run, project_id, shot_id)
+    return store.get(project_id)
 
