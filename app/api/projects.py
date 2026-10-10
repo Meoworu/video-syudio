@@ -7,6 +7,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from app.config import Settings, get_settings
 from app.domain.models import CreateProjectRequest, Project
 from app.services.director_service import DirectorService
+from app.services.narration_service import NarrationService
 from app.services.video_service import VideoService
 from app.store.project_store import ProjectStore
 
@@ -63,6 +64,24 @@ async def upload_frame(
     setattr(shot.uploads, f"{role}Frame", str(path.relative_to(store.project_dir(project_id))))
     store.save(project)
     return {"projectId": project_id, "shotId": shot_id, "role": role, "path": str(path)}
+
+
+@router.post("/{project_id}/narration/manuscript", response_model=Project)
+def generate_narration_manuscript(
+    project_id: str,
+    settings: Settings = Depends(get_settings),
+    store: ProjectStore = Depends(get_store),
+) -> Project:
+    return NarrationService(settings, store).generate_manuscript(get_project(project_id, store))
+
+
+@router.post("/{project_id}/narration/audio", response_model=Project)
+def generate_narration_audio(
+    project_id: str,
+    settings: Settings = Depends(get_settings),
+    store: ProjectStore = Depends(get_store),
+) -> Project:
+    return NarrationService(settings, store).synthesize_audio(get_project(project_id, store))
 
 
 @router.post("/{project_id}/shots/{shot_id}/generate-video", response_model=Project)

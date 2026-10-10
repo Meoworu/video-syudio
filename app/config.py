@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     minimax_api_key: str | None = Field(default=None, alias="MINIMAX_API_KEY")
     minimax_speech_url: str = Field(default="https://api.minimaxi.com/v1/t2a_v2", alias="MINIMAX_SPEECH_URL")
     minimax_speech_model: str = Field(default="speech-2.8-hd", alias="MINIMAX_SPEECH_MODEL")
+    minimax_speech_voice_id: str = Field(default="male-qn-qingse", alias="MINIMAX_SPEECH_VOICE_ID")
     minimax_speech_timeout_seconds: float = Field(default=180.0, gt=0, alias="MINIMAX_SPEECH_TIMEOUT_SECONDS")
 
 

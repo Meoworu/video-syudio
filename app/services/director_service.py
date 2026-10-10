@@ -4,7 +4,7 @@ import json
 import uuid
 from typing import Any
 
-from app.clients.google_vertex import build_vertex_client
+from app.clients.google_text import GoogleTextClient
 from app.config import Settings
 from app.domain.models import CreateProjectRequest, Project, Shot
 
@@ -12,7 +12,7 @@ from app.domain.models import CreateProjectRequest, Project, Shot
 class DirectorService:
     def __init__(self, settings: Settings, *, client: Any | None = None) -> None:
         self.settings = settings
-        self.client = client
+        self.client = GoogleTextClient(settings, client=client)
 
     def create_project(self, request: CreateProjectRequest) -> Project:
         plan = self._generate_plan(request)
@@ -38,24 +38,10 @@ class DirectorService:
         )
 
     def _generate_plan(self, request: CreateProjectRequest) -> dict[str, Any]:
-        if self.client is None:
-            self.client = build_vertex_client(self.settings)
         prompt = (
             "将下面故事拆成适合旁白驱动短视频的镜头计划。只返回 JSON，格式为 "
             '{"title":"...","shots":[{"title":"...","prompt":"...","durationSeconds":5}]}。'
             f"镜头数量约为 {request.sceneCount}，比例 {request.aspectRatio}，风格 {request.style}。故事：{request.story}"
         )
-        response = self.client.models.generate_content(
-            model=self.settings.google_text_model,
-            contents=prompt,
-            config={"response_mime_type": "application/json"},
-        )
-        text = getattr(response, "text", "") or ""
-        try:
-            value = json.loads(text)
-        except json.JSONDecodeError as error:
-            raise ValueError("Google 导演返回的镜头计划不是有效 JSON") from error
-        if not isinstance(value, dict):
-            raise ValueError("Google 导演返回的镜头计划格式无效")
-        return value
+        return self.client.generate_json(prompt)
 
