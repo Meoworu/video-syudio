@@ -3,6 +3,8 @@ from __future__ import annotations
 import base64
 import binascii
 import mimetypes
+import json
+import subprocess
 import time
 from pathlib import Path
 from typing import Any
@@ -25,7 +27,7 @@ class GoogleOmniVideoClient:
     def client(self) -> Any:
         if self._client is None:
             self._runtime = load_vertex_runtime(self.settings)
-            self._client = build_vertex_client(self.settings)
+            self._client = build_vertex_client(self.settings, self._runtime)
         return self._client
 
     def create_interaction(self, *, prompt: str, first_frame: Path, last_frame: Path, aspect_ratio: str, duration_seconds: int) -> str:
@@ -81,23 +83,43 @@ class GoogleOmniVideoClient:
             time.sleep(self.settings.google_poll_interval_seconds)
 
     def save_video(self, interaction: Any, output_path: Path) -> None:
+        status = str(_read(interaction, "status") or "").lower()
+        if status in {"failed", "cancelled", "canceled", "rejected"}:
+            raise GoogleOmniVideoError(f"Google Omni 视频任务未成功：{status}")
         video = _find_video(interaction)
         if video is None:
             raise GoogleOmniVideoError(f"Google Omni 未返回视频，状态：{_read(interaction, 'status') or 'unknown'}")
         output_path.parent.mkdir(parents=True, exist_ok=True)
+        partial_path = output_path.with_name(f"{output_path.stem}.part{output_path.suffix}")
         data = _read(video, "data")
         uri = _read(video, "uri") or _read(video, "gcs_uri")
-        if data:
-            try:
-                output_path.write_bytes(base64.b64decode(str(data), validate=True))
-            except (binascii.Error, ValueError) as error:
-                raise GoogleOmniVideoError("Google Omni 返回的 Base64 视频无效") from error
-        elif uri and str(uri).startswith("gs://"):
-            self._download_gcs(str(uri), output_path)
-        else:
-            raise GoogleOmniVideoError("Google Omni 返回了不支持的视频位置")
-        if not output_path.is_file() or output_path.stat().st_size == 0:
-            raise GoogleOmniVideoError("Google Omni 视频文件为空")
+        try:
+            if data:
+                partial_path.write_bytes(base64.b64decode(str(data), validate=True))
+            elif uri and str(uri).startswith("gs://"):
+                self._download_gcs(str(uri), partial_path)
+            else:
+                raise GoogleOmniVideoError("Google Omni 返回了不支持的视频位置")
+            result = subprocess.run(
+                [self.settings.ffprobe_bin, "-v", "error", "-show_streams", "-show_format", "-of", "json", str(partial_path)],
+                capture_output=True, text=True, check=False,
+            )
+            payload = json.loads(result.stdout) if result.returncode == 0 else {}
+            duration = float((payload.get("format") or {}).get("duration") or 0)
+            if not partial_path.is_file() or partial_path.stat().st_size == 0 or not any(
+                stream.get("codec_type") == "video" for stream in payload.get("streams", [])
+            ) or duration <= 0:
+                raise GoogleOmniVideoError("Google Omni 视频无效或 ffprobe 无法验证")
+            partial_path.replace(output_path)
+        except GoogleOmniVideoError:
+            partial_path.unlink(missing_ok=True)
+            raise
+        except (binascii.Error, ValueError) as error:
+            partial_path.unlink(missing_ok=True)
+            raise GoogleOmniVideoError("Google Omni 返回的 Base64 视频无效") from error
+        except Exception as error:
+            partial_path.unlink(missing_ok=True)
+            raise GoogleOmniVideoError(f"视频校验失败：{error}") from error
 
     def _download_gcs(self, uri: str, destination: Path) -> None:
         try:

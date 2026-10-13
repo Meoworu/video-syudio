@@ -8,7 +8,7 @@ from app.store.project_store import ProjectStore
 
 class FakeTextClient:
     def generate_json(self, prompt):
-        assert "全片旁白" in prompt
+        assert "连续全片旁白" in prompt
         return {"manuscript": "雨停后，纸船沿着溪流继续向前。"}
 
 
@@ -39,7 +39,9 @@ def test_narration_uses_google_text_and_minimax_audio(tmp_path: Path) -> None:
     )
     project = service.generate_manuscript(project)
     assert project.narration.status == "draft"
+    service._audio_duration = lambda _path: 2.0
     project = service.synthesize_audio(project)
     assert project.narration.status == "audio_ready"
-    assert (store.project_dir(project.projectId) / "audio/narration.mp3").read_bytes() == b"mp3"
+    assert project.narration.alignment[0].sentenceId == "narration_000"
+    assert (store.project_dir(project.projectId) / "audio/takes/narration_001.mp3").read_bytes() == b"mp3"
 

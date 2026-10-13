@@ -1,61 +1,89 @@
-import { StrictMode, useEffect, useState } from "react";
+import { StrictMode, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { createProject, generateManuscript, generateNarrationAudio, generateVideo, getProject, listProjects, uploadFrame } from "./api";
-import type { Project } from "./types";
-
+import { Alert, App as AntdApp, Button, ConfigProvider, Drawer, Empty, Layout, Skeleton, Space, Tabs, Typography } from "antd";
+import { FinalAssemblyPanel } from "./components/FinalAssemblyPanel";
+import { NarrationPanel } from "./components/NarrationPanel";
+import { ProjectNavigation } from "./components/ProjectNavigation";
+import { ProjectOverview } from "./components/ProjectOverview";
+import { ShotWorkspace } from "./components/ShotWorkspace";
+import { useStudioWorkspace } from "./hooks/useStudioWorkspace";
+import { studioTheme } from "./theme";
 import "./styles.css";
 
-function App() {
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [selected, setSelected] = useState<Project | null>(null);
-  const [story, setStory] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState("");
+const { Header, Sider, Content } = Layout;
 
-  async function refresh(projectId?: string) {
-    const next = projectId ? await getProject(projectId) : null;
-    setProjects(await listProjects());
-    if (next) setSelected(next);
-  }
+function Studio() {
+  const workspace = useStudioWorkspace();
+  const [mobileProjectsOpen, setMobileProjectsOpen] = useState(false);
+  const project = workspace.selected;
+  const navigation = <ProjectNavigation
+    projects={workspace.projects}
+    selectedId={workspace.selectedId}
+    jobs={workspace.videoJobs}
+    busy={workspace.busy}
+    loading={workspace.loadingProjects}
+    onSelect={(id) => { void workspace.selectProject(id); setMobileProjectsOpen(false); }}
+    onCreate={workspace.create}
+  />;
 
-  useEffect(() => { void refresh(); }, []);
+  const tabItems = project ? [
+    { key: "overview", label: "项目概览", children: <ProjectOverview project={project} busy={workspace.busy} onRetry={() => void workspace.actions.retryDirector(project.projectId)} /> },
+    { key: "shots", label: `分镜 · ${project.shots.length}`, children: <ShotWorkspace
+      project={project} busy={workspace.busy}
+      onUpdate={(shotId, draft) => workspace.actions.updateShot(project.projectId, shotId, draft)}
+      onUpload={(shotId, role, file) => workspace.actions.uploadFrame(project.projectId, shotId, role, file)}
+      onGenerate={(shotId) => workspace.actions.generateVideo(project.projectId, shotId)}
+      onCancel={(shotId) => workspace.actions.cancelVideo(project.projectId, shotId)}
+      onGenerateAll={() => workspace.actions.generateAllVideos(project.projectId)}
+    /> },
+    { key: "narration", label: "连续旁白", children: <NarrationPanel
+      project={project} busy={workspace.busy}
+      onGenerate={() => workspace.actions.generateManuscript(project.projectId)}
+      onSave={(manuscript) => workspace.actions.updateNarrationManuscript(project.projectId, manuscript)}
+      onSynthesize={(speed) => workspace.actions.generateNarrationAudio(project.projectId, speed)}
+      onSelectTake={(takeId) => workspace.actions.selectNarrationTake(project.projectId, takeId)}
+    /> },
+    { key: "assembly", label: "成片", children: <FinalAssemblyPanel project={project} busy={workspace.busy} onAssemble={() => workspace.actions.assembleProject(project.projectId)} /> },
+  ] : [];
 
-  async function create() {
-    if (!story.trim()) return;
-    setBusy(true);
-    try {
-      const project = await createProject({ story, aspectRatio: "9:16", style: "cinematic animated short film", sceneCount: 3 });
-      setStory("");
-      await refresh(project.projectId);
-    } catch (error) { setMessage(String(error)); } finally { setBusy(false); }
-  }
-
-  async function run(action: () => Promise<Project>) {
-    setBusy(true);
-    try { const project = await action(); setSelected(project); await refresh(project.projectId); }
-    catch (error) { setMessage(String(error)); }
-    finally { setBusy(false); }
-  }
-
-  return <main className="shell">
-    <header><h1>video-studio</h1><span>Google Vertex AI 视频 · MiniMax 连续旁白</span></header>
-    <section className="layout">
-      <aside className="panel"><h2>项目</h2><textarea value={story} onChange={(event) => setStory(event.target.value)} placeholder="输入故事" /><button disabled={busy || !story.trim()} onClick={() => void create()}>创建项目</button>
-        {projects.map((project) => <button className="project" key={project.projectId} onClick={() => void refresh(project.projectId)}>{project.title}</button>)}
-      </aside>
-      <section className="panel content">{message && <p className="error">{message}</p>}{!selected ? <p>请选择或创建项目。</p> : <>
-        <h2>{selected.title}</h2><p>{selected.story}</p>
-        <div className="actions"><button disabled={busy} onClick={() => void run(() => generateManuscript(selected.projectId))}>生成连续旁白文案</button><button disabled={busy || selected.narration.status !== "draft"} onClick={() => void run(() => generateNarrationAudio(selected.projectId))}>用 MiniMax 生成旁白</button></div>
-        {selected.narration.manuscript && <article className="manuscript">{selected.narration.manuscript}</article>}
-        {selected.shots.map((shot) => <article className="shot" key={shot.id}><h3>{shot.index + 1}. {shot.title}</h3><p>{shot.prompt}</p><div className="uploads"><label>首帧<input type="file" accept="image/*" onChange={(event) => { const file = event.target.files?.[0]; if (file) void run(async () => { await uploadFrame(selected.projectId, shot.id, "first", file); return getProject(selected.projectId); }); }} /></label><label>尾帧<input type="file" accept="image/*" onChange={(event) => { const file = event.target.files?.[0]; if (file) void run(async () => { await uploadFrame(selected.projectId, shot.id, "last", file); return getProject(selected.projectId); }); }} /></label></div><button disabled={busy || !shot.uploads.firstFrame || !shot.uploads.lastFrame} onClick={() => void run(() => generateVideo(selected.projectId, shot.id))}>生成 Google 视频</button><span className="status">{shot.video?.status || "待生成"}</span></article>)}
-      </>}</section>
-    </section>
-  </main>;
+  return <Layout className="studio-layout">
+    <Sider className="studio-sider" width={276} theme="light" breakpoint="lg" collapsedWidth={0}>
+      <div className="brand-lockup"><span className="brand-mark">VS</span><div><Typography.Text strong>video-studio</Typography.Text><Typography.Text className="brand-subtitle">AI 视频制作工作台</Typography.Text></div></div>
+      <div className="sider-navigation">{navigation}</div>
+      <div className="sider-footer"><Typography.Text type="secondary">Vertex AI · MiniMax Speech</Typography.Text></div>
+    </Sider>
+    <Layout className="studio-main-layout">
+      <Header className="studio-header">
+        <Button className="mobile-project-trigger" onClick={() => setMobileProjectsOpen(true)}>项目</Button>
+        <div className="header-current">
+          <Typography.Text className="eyebrow">创作空间</Typography.Text>
+          <Typography.Text strong>{project?.title || "新的视频项目"}</Typography.Text>
+        </div>
+        <Space className="header-meta" size={8}>
+          <span className="online-dot" />
+          <Typography.Text type="secondary">本地工作区</Typography.Text>
+        </Space>
+      </Header>
+      <Content className="studio-content">
+        {workspace.error && <Alert className="workspace-error" showIcon closable type="error" message="操作未完成" description={workspace.error} onClose={() => workspace.setError("")} />}
+        {workspace.loadingProject && !project ? <Skeleton active title paragraph={{ rows: 6 }} /> : project ? <>
+          <div className="content-intro"><div><Typography.Text className="eyebrow">VIDEO PRODUCTION</Typography.Text><Typography.Title level={3}>{project.title}</Typography.Title></div><Typography.Text type="secondary">从导演大纲到最终成片，在一个工作区完成。</Typography.Text></div>
+          <Tabs key={project.projectId} className="workspace-tabs" items={tabItems} />
+        </> : <div className="welcome-panel">
+          <div className="welcome-copy"><Typography.Text className="eyebrow">AI VIDEO STUDIO</Typography.Text><Typography.Title>把故事，变成一部短片。</Typography.Title><Typography.Paragraph type="secondary">用 Google Vertex AI 设计分镜和生成画面，再用连续旁白与时间线完成剪辑。</Typography.Paragraph><Typography.Text type="secondary">从左侧新建项目，或选择一个已有项目继续制作。</Typography.Text></div>
+          <div className="welcome-steps"><div><span>01</span><Typography.Text strong>导演规划</Typography.Text><Typography.Text type="secondary">大纲 · 场景 · 镜头</Typography.Text></div><div><span>02</span><Typography.Text strong>画面与旁白</Typography.Text><Typography.Text type="secondary">生成素材 · 对齐时间</Typography.Text></div><div><span>03</span><Typography.Text strong>合成成片</Typography.Text><Typography.Text type="secondary">镜头 · 音轨 · 导出</Typography.Text></div></div>
+          {!workspace.projects.length && <Empty className="welcome-empty" image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有项目，请从项目栏创建一个新项目。" />}
+        </div>}
+      </Content>
+    </Layout>
+    <Drawer title="项目" placement="left" open={mobileProjectsOpen} onClose={() => setMobileProjectsOpen(false)} width={320} className="mobile-project-drawer">
+      {navigation}
+    </Drawer>
+  </Layout>;
 }
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <App />
+    <ConfigProvider theme={studioTheme}><AntdApp><Studio /></AntdApp></ConfigProvider>
   </StrictMode>,
 );
-

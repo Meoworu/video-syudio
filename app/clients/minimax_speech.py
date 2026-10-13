@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -54,11 +55,25 @@ class MiniMaxSpeechClient:
             },
             "audio_setting": {"format": "mp3", "sample_rate": 32000, "bitrate": 128000, "channel": 1},
         }
-        response = self.client.post(
-            self.settings.minimax_speech_url,
-            headers={"Authorization": f"Bearer {self.settings.minimax_api_key}"},
-            json=payload,
-        )
+        response = None
+        for attempt in range(self.settings.minimax_max_retries + 1):
+            try:
+                response = self.client.post(
+                    self.settings.minimax_speech_url,
+                    headers={"Authorization": f"Bearer {self.settings.minimax_api_key}"},
+                    json=payload,
+                )
+                if response.status_code in {408, 425, 429, 500, 502, 503, 504} and attempt < self.settings.minimax_max_retries:
+                    time.sleep(self.settings.retry_backoff_seconds * (2 ** attempt))
+                    continue
+                response.raise_for_status()
+                break
+            except httpx.TransportError:
+                if attempt >= self.settings.minimax_max_retries:
+                    raise
+                time.sleep(self.settings.retry_backoff_seconds * (2 ** attempt))
+        if response is None:
+            raise MiniMaxSpeechError("MiniMax 请求重试耗尽")
         response.raise_for_status()
         body = response.json()
         base_resp = body.get("base_resp") or {}

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -7,6 +9,11 @@ from app.clients.google_omni_video import GoogleOmniVideoClient
 from app.config import Settings
 from app.domain.models import Project, Shot, ShotVideo
 from app.store.project_store import ProjectStore
+
+
+_ACTIVE_VIDEO_JOBS: set[tuple[str, str, str]] = set()
+_ACTIVE_VIDEO_JOBS_LOCK = threading.Lock()
+_LOGGER = logging.getLogger(__name__)
 
 
 class VideoService:
@@ -19,39 +26,121 @@ class VideoService:
         shot.video = ShotVideo(model=self.settings.google_omni_model, status="submitting")
         self.store.save(project)
 
+    def run_batch(self, project_id: str, shot_ids: list[str]) -> None:
+        for shot_id in shot_ids:
+            self.run(project_id, shot_id)
+
+    @staticmethod
+    def has_active_job(store: ProjectStore, project_id: str) -> bool:
+        root = str(store.root.resolve())
+        with _ACTIVE_VIDEO_JOBS_LOCK:
+            return any(active_root == root and active_project == project_id for active_root, active_project, _ in _ACTIVE_VIDEO_JOBS)
+
     def run(self, project_id: str, shot_id: str) -> None:
-        project = self.store.get(project_id)
-        shot = next(item for item in project.shots if item.id == shot_id)
+        active_key = (str(self.store.root.resolve()), project_id, shot_id)
+        with _ACTIVE_VIDEO_JOBS_LOCK:
+            if active_key in _ACTIVE_VIDEO_JOBS:
+                return
+            _ACTIVE_VIDEO_JOBS.add(active_key)
         try:
-            shot.video = ShotVideo(model=self.settings.google_omni_model, status="submitting")
-            self.store.save(project)
-            first = self._path(project_id, shot.uploads.firstFrame)
-            last = self._path(project_id, shot.uploads.lastFrame)
-            job_id = self.client.create_interaction(
-                prompt=shot.prompt,
-                first_frame=first,
-                last_frame=last,
-                aspect_ratio=project.aspectRatio,
-                duration_seconds=shot.durationSeconds,
-            )
-            shot.video.remoteJobId = job_id
-            shot.video.status = "generating"
-            self.store.save(project)
-            output = self.store.project_dir(project_id) / "videos" / f"{shot_id}.mp4"
+            self._run(project_id, shot_id)
+        finally:
+            with _ACTIVE_VIDEO_JOBS_LOCK:
+                _ACTIVE_VIDEO_JOBS.discard(active_key)
+
+    def _run(self, project_id: str, shot_id: str) -> None:
+        job_id: str | None = None
+        try:
+            with self.store.lock(project_id):
+                project = self.store.get(project_id)
+                shot = next(item for item in project.shots if item.id == shot_id)
+                if shot.video and shot.video.status == "cancelled":
+                    return
+                if shot.video and shot.video.status == "complete":
+                    return
+                job_id = shot.video.remoteJobId if shot.video else None
+                if not job_id:
+                    shot.video = ShotVideo(model=self.settings.google_omni_model, status="submitting")
+                    project.finalVideoPath = None
+                    self.store.save(project)
+                first = self._path(project_id, shot.uploads.firstFrame)
+                last = self._path(project_id, shot.uploads.lastFrame)
+                aspect_ratio, prompt, duration = project.aspectRatio, shot.prompt, shot.durationSeconds
+            if not job_id:
+                job_id = self.client.create_interaction(
+                    prompt=prompt, first_frame=first, last_frame=last,
+                    aspect_ratio=aspect_ratio, duration_seconds=duration,
+                )
+                with self.store.lock(project_id):
+                    project = self.store.get(project_id)
+                    shot = next(item for item in project.shots if item.id == shot_id)
+                    if shot.video and shot.video.status == "cancelled":
+                        self.client.cancel_interaction(job_id)
+                        return
+                    shot.video.remoteJobId = job_id
+                    shot.video.status = "generating"
+                    self.store.save(project)
+            else:
+                with self.store.lock(project_id):
+                    project = self.store.get(project_id)
+                    shot = next(item for item in project.shots if item.id == shot_id)
+                    shot.video.status = "generating"
+                    self.store.save(project)
             interaction = self.client.wait_for_completion(job_id)
-            shot.video.status = "downloading"
-            self.store.save(project)
+            remote_status = str(getattr(interaction, "status", "") or (interaction.get("status") if isinstance(interaction, dict) else "")).lower()
+            if remote_status in {"cancelled", "canceled"}:
+                with self.store.lock(project_id):
+                    project = self.store.get(project_id)
+                    shot = next(item for item in project.shots if item.id == shot_id)
+                    shot.video.status = "cancelled"
+                    self.store.save(project)
+                return
+            with self.store.lock(project_id):
+                project = self.store.get(project_id)
+                shot = next(item for item in project.shots if item.id == shot_id)
+                if shot.video.status == "cancelled":
+                    return
+                shot.video.status = "downloading"
+                self.store.save(project)
+            output = self.store.project_dir(project_id) / "videos" / f"{shot_id}.mp4"
             self.client.save_video(interaction, output)
-            shot.video.status = "complete"
-            shot.video.path = str(output.relative_to(self.store.project_dir(project_id)))
-            self.store.save(project)
+            with self.store.lock(project_id):
+                project = self.store.get(project_id)
+                shot = next(item for item in project.shots if item.id == shot_id)
+                if shot.video.status == "cancelled":
+                    output.unlink(missing_ok=True)
+                    shot.video.path = None
+                    self.store.save(project)
+                    return
+                shot.video.status = "complete"
+                shot.video.path = str(output.relative_to(self.store.project_dir(project_id)))
+                self.store.save(project)
         except Exception as error:
-            project = self.store.get(project_id)
-            shot = next(item for item in project.shots if item.id == shot_id)
-            shot.video = shot.video or ShotVideo(model=self.settings.google_omni_model)
-            shot.video.status = "failed"
-            shot.video.errorMessage = str(error)
-            self.store.save(project)
+            try:
+                with self.store.lock(project_id):
+                    project = self.store.get(project_id)
+                    shot = next(item for item in project.shots if item.id == shot_id)
+                    if shot.video and shot.video.status == "cancelled":
+                        if job_id:
+                            shot.video.remoteJobId = job_id
+                            shot.video.status = "generating"
+                            shot.video.errorMessage = f"远端取消未完成，请重试取消：{error}"
+                            self.store.save(project)
+                        return
+                    shot.video = shot.video or ShotVideo(model=self.settings.google_omni_model)
+                    shot.video.status = "failed"
+                    shot.video.errorMessage = str(error)
+                    self.store.save(project)
+            except FileNotFoundError:
+                if job_id:
+                    try:
+                        self.client.cancel_interaction(job_id)
+                    except Exception as cancel_error:
+                        _LOGGER.warning(
+                            "Failed to cancel orphaned video job project=%s shot=%s job=%s error=%s",
+                            project_id, shot_id, job_id, cancel_error,
+                        )
+                return
 
     def _path(self, project_id: str, relative_path: str | None) -> Path:
         if not relative_path:
@@ -61,4 +150,24 @@ class VideoService:
         if root not in path.parents or not path.is_file():
             raise FileNotFoundError(relative_path)
         return path
+
+    def cancel(self, project_id: str, shot_id: str) -> None:
+        with self.store.lock(project_id):
+            project = self.store.get(project_id)
+            shot = next((item for item in project.shots if item.id == shot_id), None)
+            if not shot or not shot.video:
+                raise ValueError("镜头没有正在运行的视频任务")
+            if shot.video.status not in {"submitting", "generating", "downloading"}:
+                raise ValueError("镜头视频任务当前不可取消")
+            remote_job_id = shot.video.remoteJobId
+            if not remote_job_id:
+                shot.video.status = "cancelled"
+                self.store.save(project)
+                return
+        self.client.cancel_interaction(remote_job_id)
+        with self.store.lock(project_id):
+            project = self.store.get(project_id)
+            shot = next(item for item in project.shots if item.id == shot_id)
+            shot.video.status = "cancelled"
+            self.store.save(project)
 

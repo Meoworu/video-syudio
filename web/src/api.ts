@@ -1,10 +1,24 @@
 import type { Project } from "./types";
 
 const base = "/v1";
+export function fileUrl(projectId: string, path: string) {
+  return `${base}/projects/${encodeURIComponent(projectId)}/files/${path.split("/").map(encodeURIComponent).join("/")}`;
+}
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${base}${path}`, init);
-  if (!response.ok) throw new Error(await response.text());
+  if (!response.ok) {
+    const body = await response.text();
+    let message = body || response.statusText;
+    try {
+      const parsed = JSON.parse(body) as { detail?: unknown };
+      if (typeof parsed.detail === "string") message = parsed.detail;
+      else if (Array.isArray(parsed.detail)) message = parsed.detail.map((item) => typeof item === "object" && item && "msg" in item ? String(item.msg) : String(item)).join("；");
+    } catch {
+      // Keep plain-text error responses as-is.
+    }
+    throw new Error(message || `请求失败（${response.status}）`);
+  }
   return response.json() as Promise<T>;
 }
 
@@ -32,7 +46,39 @@ export function generateManuscript(projectId: string) {
   return request<Project>(`/projects/${projectId}/narration/manuscript`, { method: "POST" });
 }
 
-export function generateNarrationAudio(projectId: string) {
-  return request<Project>(`/projects/${projectId}/narration/audio`, { method: "POST" });
+export function generateNarrationAudio(projectId: string, speed = 1) {
+  return request<Project>(`/projects/${projectId}/narration/audio?speed=${speed}`, { method: "POST" });
+}
+
+export function updateNarrationManuscript(projectId: string, manuscript: string) {
+  return request<Project>(`/projects/${projectId}/narration/manuscript`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ manuscript }) });
+}
+
+export function assembleProject(projectId: string) {
+  return request<Project>(`/projects/${projectId}/assemble`, { method: "POST" });
+}
+
+export function updateShot(projectId: string, shotId: string, payload: { title?: string; prompt?: string; durationSeconds?: number; transitionIn?: string }) {
+  return request<Project>(`/projects/${projectId}/shots/${shotId}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+}
+
+export function generateAllVideos(projectId: string) {
+  return request<Project>(`/projects/${projectId}/generate-videos`, { method: "POST" });
+}
+
+export function cancelVideo(projectId: string, shotId: string) {
+  return request<Project>(`/projects/${projectId}/shots/${shotId}/cancel-video`, { method: "POST" });
+}
+
+export function selectNarrationTake(projectId: string, takeId: string) {
+  return request<Project>(`/projects/${projectId}/narration/takes/${takeId}/select`, { method: "POST" });
+}
+
+export function listVideoJobs() {
+  return request<{ projectId: string; projectTitle: string; shotId: string; shotTitle: string; status: string; path?: string | null; errorMessage?: string | null }[]>("/projects/videos/jobs");
+}
+
+export function retryDirector(projectId: string) {
+  return request<Project>(`/projects/${projectId}/director/retry`, { method: "POST" });
 }
 

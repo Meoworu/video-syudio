@@ -1,5 +1,7 @@
 import base64
+import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import httpx
 
@@ -24,7 +26,15 @@ class FakeClient:
         self.interactions = FakeInteractions()
 
 
-def test_google_omni_submits_both_frames_and_saves_inline_video(tmp_path: Path) -> None:
+def test_google_omni_submits_both_frames_and_saves_inline_video(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.clients.google_omni_video.subprocess.run",
+        lambda *args, **kwargs: SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps({"streams": [{"codec_type": "video"}], "format": {"duration": "5"}}),
+            stderr="",
+        ),
+    )
     first = tmp_path / "first.png"
     last = tmp_path / "last.png"
     first.write_bytes(b"first")

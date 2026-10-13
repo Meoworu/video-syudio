@@ -43,8 +43,8 @@ def load_vertex_runtime(settings: Settings) -> GoogleVertexRuntime:
     )
 
 
-def build_vertex_client(settings: Settings) -> Any:
-    runtime = load_vertex_runtime(settings)
+def build_vertex_client(settings: Settings, runtime: GoogleVertexRuntime | None = None) -> Any:
+    runtime = runtime or load_vertex_runtime(settings)
     try:
         from google import genai
     except ImportError as error:  # pragma: no cover
