@@ -20,11 +20,11 @@ from app.store.project_store import ProjectStore
 
 
 class DirectorService:
-    """Google Vertex-only, two-stage story and shot-planning pipeline."""
+    """Google Gemini, two-stage story and shot-planning pipeline."""
 
     def __init__(self, settings: Settings, *, client: Any | None = None) -> None:
         self.settings = settings
-        self.client = GoogleTextClient(settings, client=client)
+        self.client = client or GoogleTextClient(settings)
 
     def create_project(self, request: CreateProjectRequest) -> Project:
         outline = self._generate_outline(request)

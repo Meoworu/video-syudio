@@ -4,12 +4,12 @@ import json
 import time
 from typing import Any
 
-from app.clients.google_vertex import build_vertex_client
+from app.clients.google_client import build_google_client, safe_google_error
 from app.config import Settings
 
 
 class GoogleTextError(RuntimeError):
-    """Raised when Vertex AI does not return valid structured text."""
+    """Raised when Gemini does not return valid structured text."""
 
 
 class GoogleTextClient:
@@ -20,7 +20,7 @@ class GoogleTextClient:
     @property
     def client(self) -> Any:
         if self._client is None:
-            self._client = build_vertex_client(self.settings)
+            self._client = build_google_client(self.settings)
         return self._client
 
     def generate_json(self, prompt: str) -> dict[str, Any]:
@@ -34,18 +34,18 @@ class GoogleTextClient:
                 )
                 value = json.loads(getattr(response, "text", "") or "")
                 if not isinstance(value, dict):
-                    raise GoogleTextError("Vertex AI 返回的内容不是 JSON 对象")
+                    raise GoogleTextError("Gemini 返回的内容不是 JSON 对象")
                 return value
             except json.JSONDecodeError as error:
-                last_error = GoogleTextError("Vertex AI 返回的内容不是有效 JSON")
+                last_error = GoogleTextError("Gemini 返回的内容不是有效 JSON")
                 last_error.__cause__ = error
             except Exception as error:
                 last_error = error
                 if attempt >= self.settings.google_text_max_retries or not _is_transient(error):
-                    raise
+                    raise GoogleTextError(f"Gemini 文本请求失败：{safe_google_error(error, self.settings)}") from None
             if attempt < self.settings.google_text_max_retries:
                 time.sleep(self.settings.retry_backoff_seconds * (2 ** attempt))
-        raise GoogleTextError(f"Vertex AI 文本请求重试耗尽：{last_error}") from last_error
+        raise GoogleTextError(f"Gemini 文本请求重试耗尽：{safe_google_error(last_error, self.settings)}") from None
 
 
 def _is_transient(error: Exception) -> bool:

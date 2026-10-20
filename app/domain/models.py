@@ -120,7 +120,7 @@ class ShotUploads(BaseModel):
 
 
 class ShotVideo(BaseModel):
-    provider: Literal["google_vertex"] = "google_vertex"
+    provider: Literal["google_vertex", "google_gemini"] = "google_gemini"
     model: str
     status: Literal["idle", "submitting", "generating", "downloading", "complete", "cancelled", "failed"] = "idle"
     remoteJobId: str | None = None

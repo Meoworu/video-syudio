@@ -4,7 +4,7 @@ from app.main import app
 
 
 def test_health_reports_provider_configuration(monkeypatch) -> None:
-    monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "test-project")
+    monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
     monkeypatch.setenv("MINIMAX_API_KEY", "test-key")
     from app.config import get_settings
 
@@ -14,7 +14,7 @@ def test_health_reports_provider_configuration(monkeypatch) -> None:
     assert response.json() == {
         "ok": True,
         "service": "video-studio",
-        "googleProjectConfigured": True,
+        "googleApiKeyConfigured": True,
         "minimaxConfigured": True,
     }
     get_settings.cache_clear()

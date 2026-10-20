@@ -15,11 +15,7 @@ cd web && npm ci
 
 ## 配置服务商
 
-在 `.env` 填写 `GOOGLE_CLOUD_PROJECT` 和 `MINIMAX_API_KEY`，保持 `GOOGLE_CLOUD_LOCATION=global`。Google 使用 Application Default Credentials（ADC）：
-
-```bash
-gcloud auth application-default login
-```
+在 `.env` 填写 `GOOGLE_API_KEY` 和 `MINIMAX_API_KEY`。`GEMINI_API_KEY`、`GOOGLE_CLOUD_API_KEY` 可作为 Google Key 的备用名称。Google API Key 仅由后端读取，不要放入前端配置。`GOOGLE_HTTP_TIMEOUT_SECONDS` 设置单次 Google 请求的超时，默认 120 秒。
 
 如果 FFmpeg 不在 `PATH`，在 `.env` 设置 `FFMPEG_BIN` 和 `FFPROBE_BIN` 的可执行文件路径。仅浏览界面和调用健康检查时，可以暂不配置服务商凭据；生成内容需要这些配置。
 
@@ -38,7 +34,7 @@ cd web
 npm run dev
 ```
 
-打开 `http://127.0.0.1:5173/`。Vite 会将 `/v1` 代理到 `http://127.0.0.1:8010`。可用 `/v1/health` 检查 API 是否运行，用 `/v1/ready` 检查 Google ADC、MiniMax、FFmpeg 等配置。
+打开 `http://127.0.0.1:5173/`。Vite 会将 `/v1` 代理到 `http://127.0.0.1:8010`。可用 `/v1/health` 检查 API 是否运行，用 `/v1/ready` 检查 Google API Key、MiniMax、FFmpeg 等配置。
 
 ## 本地检查
 

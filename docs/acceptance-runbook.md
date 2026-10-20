@@ -1,6 +1,6 @@
 # video-studio 联调验收清单
 
-核心功能迁移已完成，待与用户联合测试；真实 Google Cloud / MiniMax 调用、自动化测试和前端构建尚未执行。
+Gemini Developer API Key 迁移已实现；按当前环境完成自动化测试和前端构建后，再进行真实 Google / MiniMax 联测。
 
 范围说明：已提供 `DELETE /v1/projects/{project_id}`，会永久删除目标项目目录及其上传/生成素材；运行中的导演或视频任务会被拒绝删除，项目 ID 或目录边界异常也会拒绝操作。此操作不可恢复，请在联测中只对专门创建的测试项目验证。
 
@@ -8,10 +8,10 @@
 
 1. 安装 Python 3.12+、Node.js、FFmpeg 和 ffprobe。
 2. 在项目根目录执行 `python -m venv .venv && . .venv/bin/activate && pip install -e ".[dev]"`。
-3. 复制 `.env.example` 为 `.env`，填写 `GOOGLE_CLOUD_PROJECT` 与 `MINIMAX_API_KEY`；不使用 Google API Key。
-4. 执行 `gcloud auth application-default login`，并确认目标项目启用了 Vertex AI / Agent Platform API、账号具备访问权限和模型配额；Gemini Omni 视频目前需使用 `GOOGLE_CLOUD_LOCATION=global`。
+3. 复制 `.env.example` 为 `.env`，填写 `GOOGLE_API_KEY` 与 `MINIMAX_API_KEY`。也可用 `GEMINI_API_KEY` 或 `GOOGLE_CLOUD_API_KEY` 作为 Google Key 名称。单次请求超时默认 120 秒，可用 `GOOGLE_HTTP_TIMEOUT_SECONDS` 调整。
+4. 确认 Key 所属项目已启用 Gemini API，并且 Key 和项目有权调用配置的模型；此流程使用 Gemini Developer API，不使用 Vertex AI ADC。
 5. 后端执行 `uvicorn app.main:app --host 127.0.0.1 --port 8010`；前端在 `web/` 执行 `npm install && npm run dev`。
-6. 查看 `http://127.0.0.1:8010/v1/ready`，检查 ADC、项目配置、MiniMax Key、FFmpeg 和 ffprobe 项。
+6. 查看 `http://127.0.0.1:8010/v1/ready`，检查 Google API Key、MiniMax Key、FFmpeg 和 ffprobe 项。
 
 ## 完整流程
 
@@ -22,7 +22,7 @@
 5. 生成连续旁白；检查完整句子、全片时长预算、跨镜头 cue 时间线；手动修改后保存并确认重新对齐。
 6. 使用 MiniMax 生成至少两个不同语速版本，播放、切换 take，并确认所选版本与音频时长状态一致。
 7. 选择硬切/叠化方案后合成成片；确认音轨完整、播放正常、时长与时间线相符，旧成片只在新成片校验成功后替换。
-8. 在测试中的视频任务期间重启 API，确认有持久 Interaction ID 的任务能恢复；无法确认 ID 的提交需显示可操作失败提示。
+8. 在新的 Gemini 视频任务期间重启 API，确认持久 Interaction ID 能恢复；旧 Vertex 任务不会发送到 Gemini API，应先在切换前结束旧活动任务。
 
 ## 自动检查
 
@@ -34,4 +34,4 @@ python -m pytest -q
 cd web && npm run build
 ```
 
-记录模型 ID、Google 区域、MiniMax 模型、失败信息、耗时和成本估算；不要记录密钥、ADC 内容或完整凭证路径。
+记录模型 ID、MiniMax 模型、失败信息、耗时和成本估算；不要记录密钥。

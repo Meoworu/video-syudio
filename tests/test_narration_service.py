@@ -32,7 +32,7 @@ def test_narration_uses_google_text_and_minimax_audio(tmp_path: Path) -> None:
     )
     store.create(project)
     service = NarrationService(
-        Settings(_env_file=None, GOOGLE_CLOUD_PROJECT="project"),
+        Settings(_env_file=None),
         store,
         text_client=FakeTextClient(),
         speech_client=FakeSpeechClient(),

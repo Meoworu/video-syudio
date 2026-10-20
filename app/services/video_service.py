@@ -5,7 +5,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from app.clients.google_omni_video import GoogleOmniVideoClient
+from app.clients.google_omni_video import GoogleOmniVideoCancelled, GoogleOmniVideoClient
 from app.config import Settings
 from app.domain.models import Project, Shot, ShotVideo
 from app.store.project_store import ProjectStore
@@ -58,6 +58,8 @@ class VideoService:
                     return
                 if shot.video and shot.video.status == "complete":
                     return
+                if shot.video and shot.video.provider == "google_vertex":
+                    raise ValueError("此任务属于旧 Vertex API，无法用 Gemini API Key 恢复；请确认旧任务后重新提交")
                 job_id = shot.video.remoteJobId if shot.video else None
                 if not job_id:
                     shot.video = ShotVideo(model=self.settings.google_omni_model, status="submitting")
@@ -75,7 +77,13 @@ class VideoService:
                     project = self.store.get(project_id)
                     shot = next(item for item in project.shots if item.id == shot_id)
                     if shot.video and shot.video.status == "cancelled":
-                        self.client.cancel_interaction(job_id)
+                        try:
+                            self.client.cancel_interaction(job_id)
+                        except Exception as cancel_error:
+                            shot.video.remoteJobId = job_id
+                            shot.video.status = "generating"
+                            shot.video.errorMessage = f"远端取消失败，任务可能仍在运行，请重试取消：{cancel_error}"
+                            self.store.save(project)
                         return
                     shot.video.remoteJobId = job_id
                     shot.video.status = "generating"
@@ -103,7 +111,11 @@ class VideoService:
                 shot.video.status = "downloading"
                 self.store.save(project)
             output = self.store.project_dir(project_id) / "videos" / f"{shot_id}.mp4"
-            self.client.save_video(interaction, output)
+            self.client.save_video(
+                interaction,
+                output,
+                cancel_check=lambda: self._is_cancelled(project_id, shot_id),
+            )
             with self.store.lock(project_id):
                 project = self.store.get(project_id)
                 shot = next(item for item in project.shots if item.id == shot_id)
@@ -115,17 +127,14 @@ class VideoService:
                 shot.video.status = "complete"
                 shot.video.path = str(output.relative_to(self.store.project_dir(project_id)))
                 self.store.save(project)
+        except GoogleOmniVideoCancelled:
+            return
         except Exception as error:
             try:
                 with self.store.lock(project_id):
                     project = self.store.get(project_id)
                     shot = next(item for item in project.shots if item.id == shot_id)
                     if shot.video and shot.video.status == "cancelled":
-                        if job_id:
-                            shot.video.remoteJobId = job_id
-                            shot.video.status = "generating"
-                            shot.video.errorMessage = f"远端取消未完成，请重试取消：{error}"
-                            self.store.save(project)
                         return
                     shot.video = shot.video or ShotVideo(model=self.settings.google_omni_model)
                     shot.video.status = "failed"
@@ -151,6 +160,12 @@ class VideoService:
             raise FileNotFoundError(relative_path)
         return path
 
+    def _is_cancelled(self, project_id: str, shot_id: str) -> bool:
+        with self.store.lock(project_id):
+            project = self.store.get(project_id)
+            shot = next((item for item in project.shots if item.id == shot_id), None)
+            return bool(shot and shot.video and shot.video.status == "cancelled")
+
     def cancel(self, project_id: str, shot_id: str) -> None:
         with self.store.lock(project_id):
             project = self.store.get(project_id)
@@ -159,6 +174,8 @@ class VideoService:
                 raise ValueError("镜头没有正在运行的视频任务")
             if shot.video.status not in {"submitting", "generating", "downloading"}:
                 raise ValueError("镜头视频任务当前不可取消")
+            if shot.video.provider == "google_vertex":
+                raise ValueError("此任务属于旧 Vertex API，无法通过 Gemini API Key 取消；请在 Google Cloud 控制台处理后重新提交")
             remote_job_id = shot.video.remoteJobId
             if not remote_job_id:
                 shot.video.status = "cancelled"

@@ -7,7 +7,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 FORBIDDEN = re.compile(
-    r"comfyui|azure|elevenlabs|google[_-]?tts|GOOGLE_CLOUD_API_KEY|\bark\b|bailian|qwen|openai",
+    r"comfyui|azure|elevenlabs|google[_-]?tts|\bark\b|bailian|qwen|openai",
     re.IGNORECASE,
 )
 SCAN_ROOTS = (ROOT / "app", ROOT / "web" / "src")

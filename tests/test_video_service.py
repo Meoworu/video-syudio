@@ -2,7 +2,7 @@ from pathlib import Path
 
 from app.clients.google_omni_video import GoogleOmniVideoClient
 from app.config import Settings
-from app.domain.models import Project, Shot
+from app.domain.models import Project, Shot, ShotVideo
 from app.services.video_service import VideoService
 from app.store.project_store import ProjectStore
 
@@ -16,7 +16,7 @@ class FakeVideoClient:
         assert job_id == "interaction-1"
         return {"status": "completed"}
 
-    def save_video(self, interaction, output):
+    def save_video(self, interaction, output, *, cancel_check=None):
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_bytes(b"video")
 
@@ -38,10 +38,62 @@ def test_video_service_persists_complete_result(tmp_path: Path) -> None:
     project.shots[0].uploads.firstFrame = str(first.relative_to(store.project_dir(project.projectId)))
     project.shots[0].uploads.lastFrame = str(last.relative_to(store.project_dir(project.projectId)))
     store.save(project)
-    service = VideoService(Settings(_env_file=None, GOOGLE_CLOUD_PROJECT="project"), store, client=FakeVideoClient())
+    service = VideoService(Settings(_env_file=None), store, client=FakeVideoClient())
     service.run(project.projectId, "shot_001")
     result = store.get(project.projectId).shots[0].video
     assert result is not None
     assert result.status == "complete"
     assert (store.project_dir(project.projectId) / result.path).read_bytes() == b"video"
+
+
+def test_video_service_does_not_send_legacy_vertex_job_to_gemini(tmp_path: Path) -> None:
+    store = ProjectStore(tmp_path)
+    project = Project(
+        projectId="video_legacy1234",
+        title="旧任务",
+        story="故事",
+        aspectRatio="9:16",
+        style="style",
+        shots=[Shot(id="shot_001", index=0, title="开场", prompt="画面", durationSeconds=5)],
+    )
+    project.shots[0].video = ShotVideo(
+        model="gemini-omni-flash-preview", provider="google_vertex",
+        status="generating", remoteJobId="vertex-job-1",
+    )
+    store.create(project)
+    fake = FakeVideoClient()
+    service = VideoService(Settings(_env_file=None), store, client=fake)
+
+    service.run(project.projectId, "shot_001")
+
+    result = store.get(project.projectId).shots[0].video
+    assert result is not None
+    assert result.status == "failed"
+    assert "旧 Vertex API" in (result.errorMessage or "")
+
+
+def test_video_service_does_not_cancel_legacy_vertex_job_with_gemini(tmp_path: Path) -> None:
+    store = ProjectStore(tmp_path)
+    project = Project(
+        projectId="video_legacy5678",
+        title="旧任务",
+        story="故事",
+        aspectRatio="9:16",
+        style="style",
+        shots=[Shot(id="shot_001", index=0, title="开场", prompt="画面", durationSeconds=5)],
+    )
+    project.shots[0].video = ShotVideo(
+        model="gemini-omni-flash-preview", provider="google_vertex",
+        status="generating", remoteJobId="vertex-job-1",
+    )
+    store.create(project)
+    fake = FakeVideoClient()
+    service = VideoService(Settings(_env_file=None), store, client=fake)
+
+    try:
+        service.cancel(project.projectId, "shot_001")
+    except ValueError as error:
+        assert "旧 Vertex API" in str(error)
+    else:
+        raise AssertionError("legacy Vertex task must not be sent to Gemini cancellation")
 
