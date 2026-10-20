@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import mimetypes
+import uuid
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 
 from app.config import Settings, get_settings
-from app.domain.models import CreateProjectRequest, Project, ShotVideo, UpdateShotRequest
+from app.domain.models import CreateProjectRequest, FrameVersion, Project, ShotVideo, UpdateShotRequest
 from app.services.director_service import DirectorService
 from app.services.assembly_service import AssemblyService
 from app.services.editing import rebuild_edit_plan
@@ -64,7 +66,9 @@ def delete_project(project_id: str, store: ProjectStore = Depends(get_store)) ->
         project = get_project(project_id, store)
         active_video_statuses = {"submitting", "generating", "downloading"}
         if VideoService.has_active_job(store, project_id) or project.status == "generating" or any(
-            shot.video and shot.video.status in active_video_statuses for shot in project.shots
+            shot.video and shot.video.status in active_video_statuses or any(
+                shot.frames[role].job and shot.frames[role].job.status in {"queued", "generating"} for role in ("first", "last")
+            ) for shot in project.shots
         ):
             raise HTTPException(status_code=409, detail="项目仍有运行中的任务，请完成或取消任务后再删除")
         try:
@@ -101,7 +105,7 @@ def get_project_file(project_id: str, relative_path: str, store: ProjectStore = 
         root = store.project_dir(project_id).resolve()
     except ValueError as error:
         raise HTTPException(status_code=400, detail="项目 ID 无效") from error
-    if relative_path.split("/", 1)[0] not in {"frames", "videos", "audio", "final"}:
+    if relative_path.split("/", 1)[0] not in {"assets", "frames", "videos", "audio", "final"}:
         raise HTTPException(status_code=404, detail="文件不存在")
     path = (root / relative_path).resolve()
     if root not in path.parents or not path.is_file():
@@ -128,32 +132,48 @@ async def upload_frame(
     if not suffix:
         raise HTTPException(status_code=400, detail="只支持 PNG、JPG 或 WebP")
     content_length = request.headers.get("content-length")
-    if content_length and content_length.isdigit() and int(content_length) > 20 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="图片不能为空且不能超过 20 MB")
+    if content_length and content_length.isdigit() and int(content_length) > 6_000_000:
+        raise HTTPException(status_code=413, detail="图片不能为空且不能超过 6 MB")
     chunks = bytearray()
     async for chunk in request.stream():
         chunks.extend(chunk)
-        if len(chunks) > 20 * 1024 * 1024:
-            raise HTTPException(status_code=400, detail="图片不能为空且不能超过 20 MB")
+        if len(chunks) > 6_000_000:
+            raise HTTPException(status_code=413, detail="图片不能为空且不能超过 6 MB")
     content = bytes(chunks)
     if not content:
-        raise HTTPException(status_code=400, detail="图片不能为空且不能超过 20 MB")
+        raise HTTPException(status_code=400, detail="图片不能为空且不能超过 6 MB")
     signatures = {".png": b"\x89PNG\r\n\x1a\n", ".jpg": b"\xff\xd8\xff", ".webp": b"RIFF"}
     if not content.startswith(signatures[suffix]) or (suffix == ".webp" and content[8:12] != b"WEBP"):
         raise HTTPException(status_code=400, detail="图片内容与文件类型不匹配")
-    with store.lock(project_id):
-        project = get_project(project_id, store)
-        shot = next((item for item in project.shots if item.id == shot_id), None)
-        if not shot:
-            raise HTTPException(status_code=404, detail="镜头不存在")
-        if shot.video and shot.video.status in {"submitting", "generating", "downloading"}:
-            raise HTTPException(status_code=409, detail="视频任务执行中，暂不能替换首尾帧")
-        path = store.save_upload(project_id, shot_id, role, content, suffix)
-        setattr(shot.uploads, f"{role}Frame", str(path.relative_to(store.project_dir(project_id))))
-        shot.video = None
-        project.finalVideoPath = None
-        store.save(project)
-        return {"projectId": project_id, "shotId": shot_id, "role": role, "path": str(path.relative_to(store.project_dir(project_id)))}
+    from app.services.asset_service import InvalidImageError, normalize_image
+    try:
+        normalized, _, _ = await run_in_threadpool(normalize_image, content, content_type)
+    except InvalidImageError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+    def persist_frame() -> dict[str, str]:
+        with store.lock(project_id):
+            project = get_project(project_id, store)
+            shot = next((item for item in project.shots if item.id == shot_id), None)
+            if not shot:
+                raise HTTPException(status_code=404, detail="镜头不存在")
+            if shot.video and shot.video.status in {"submitting", "generating", "downloading"}:
+                raise HTTPException(status_code=409, detail="视频任务执行中，暂不能替换首尾帧")
+            if shot.frames[role].job and shot.frames[role].job.status in {"queued", "generating"}:
+                raise HTTPException(status_code=409, detail="图片正在生成，暂不能替换首尾帧")
+            version_id = uuid.uuid4().hex
+            relative_path = f"frames/{shot_id}/{role}/{version_id}.webp"
+            store.save_media(project_id, relative_path, normalized)
+            slot = shot.frames[role]
+            slot.versions.append(FrameVersion(id=version_id, path=relative_path, source="upload", model="manual", promptSnapshot=getattr(shot, f"{role}FramePrompt")))
+            slot.selectedVersionId = version_id
+            setattr(shot.uploads, f"{role}Frame", relative_path)
+            shot.video = None
+            project.finalVideoPath = None
+            store.save(project)
+            return {"projectId": project_id, "shotId": shot_id, "role": role, "path": relative_path}
+
+    return await run_in_threadpool(persist_frame)
 
 
 @router.post("/{project_id}/narration/manuscript", response_model=Project)
@@ -226,6 +246,8 @@ def generate_video(
             raise HTTPException(status_code=400, detail="请先上传首帧和尾帧")
         if shot.video and shot.video.status in {"submitting", "generating", "downloading"}:
             return project
+        if any(shot.frames[role].job and shot.frames[role].job.status in {"queued", "generating"} for role in ("first", "last")):
+            raise HTTPException(status_code=409, detail="首尾帧生成期间不能提交视频任务")
         VideoService(settings, store).mark_submitting(project, shot)
         background_tasks.add_task(VideoService(settings, store).run, project_id, shot_id)
         return store.get(project_id)
@@ -245,6 +267,8 @@ def update_shot(
             raise HTTPException(status_code=404, detail="镜头不存在")
         if shot.video and shot.video.status in {"submitting", "generating", "downloading"}:
             raise HTTPException(status_code=409, detail="视频任务执行中，暂不能修改镜头")
+        if any(shot.frames[role].job and shot.frames[role].job.status in {"queued", "generating"} for role in ("first", "last")):
+            raise HTTPException(status_code=409, detail="首尾帧生成期间不能修改镜头")
         changes = payload.model_dump(exclude_unset=True)
         if not changes:
             return project
@@ -286,6 +310,8 @@ def generate_all_videos(
                 continue
             if shot.video and shot.video.status in {"submitting", "generating", "downloading", "complete"}:
                 continue
+            if any(shot.frames[role].job and shot.frames[role].job.status in {"queued", "generating"} for role in ("first", "last")):
+                continue
             shot.video = ShotVideo(model=settings.google_omni_model, status="submitting")
             pending.append(shot.id)
         if not pending:
@@ -308,6 +334,35 @@ def cancel_video(
         return get_project(project_id, store)
     except ValueError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@router.delete("/{project_id}/shots/{shot_id}/video", response_model=Project)
+def delete_failed_video(
+    project_id: str,
+    shot_id: str,
+    store: ProjectStore = Depends(get_store),
+) -> Project:
+    with store.lock(project_id):
+        project = get_project(project_id, store)
+        shot = next((item for item in project.shots if item.id == shot_id), None)
+        if shot is None:
+            raise HTTPException(status_code=404, detail="镜头不存在")
+        if not shot.video or shot.video.status != "failed":
+            raise HTTPException(status_code=409, detail="只能删除生成失败的任务")
+        if shot.video.path:
+            root = store.project_dir(project_id).resolve()
+            relative_path = shot.video.path
+            candidate = root / relative_path
+            if relative_path.split("/", 1)[0] != "videos" or candidate.is_symlink():
+                raise HTTPException(status_code=400, detail="视频路径无效，拒绝删除")
+            video_path = candidate.resolve()
+            if root not in video_path.parents:
+                raise HTTPException(status_code=400, detail="视频路径无效，拒绝删除")
+            if video_path.is_file():
+                video_path.unlink()
+        shot.video = None
+        store.save(project)
+        return project
 
 
 @router.get("/videos/jobs")

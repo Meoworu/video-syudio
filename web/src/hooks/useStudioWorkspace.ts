@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  assembleProject, cancelVideo, createProject, generateAllVideos, generateManuscript,
-  generateNarrationAudio, generateVideo, getProject, listProjects, listVideoJobs,
-  retryDirector, selectNarrationTake, updateNarrationManuscript, updateShot, uploadFrame,
+  assembleProject, cancelVideo, createAsset, createProject, deleteAsset, deleteFailedFrameJob, deleteFailedVideo, generateAllVideos,
+  generateFrame, generateFrames, generateManuscript, generateNarrationAudio, generateVideo, getProject, listProjects, listVideoJobs,
+  retryDirector, selectFrameVersion, selectNarrationTake, updateAsset, updateFrameConfig, updateNarrationManuscript, updateShot, uploadAssetImage, uploadFrame,
 } from "../api";
 import type { Project, Shot } from "../types";
 
@@ -118,6 +118,16 @@ export function useStudioWorkspace() {
     }),
     generateVideo: (projectId: string, shotId: string) => run(() => generateVideo(projectId, shotId)),
     cancelVideo: (projectId: string, shotId: string) => run(() => cancelVideo(projectId, shotId)),
+    deleteFailedVideo: (projectId: string, shotId: string) => run(() => deleteFailedVideo(projectId, shotId)),
+    createAsset: (projectId: string, payload: { name: string; description?: string; scopeShotIds: string[] }) => run(() => createAsset(projectId, payload)),
+    updateAsset: (projectId: string, assetId: string, payload: { name: string; description?: string; scopeShotIds: string[] }) => run(() => updateAsset(projectId, assetId, payload)),
+    uploadAssetImage: (projectId: string, assetId: string, file: File) => run(() => uploadAssetImage(projectId, assetId, file)),
+    deleteAsset: (projectId: string, assetId: string) => run(() => deleteAsset(projectId, assetId)),
+    updateFrameConfig: (projectId: string, shotId: string, role: "first" | "last", payload: { prompt: string; referenceMode: "auto" | "manual"; assetIds: string[]; restoreDefaultPrompt?: boolean }) => run(() => updateFrameConfig(projectId, shotId, role, payload)),
+    generateFrame: (projectId: string, shotId: string, role: "first" | "last") => run(() => generateFrame(projectId, shotId, role, crypto.randomUUID())),
+    generateFrames: (projectId: string, shotId: string) => run(() => generateFrames(projectId, shotId, crypto.randomUUID())),
+    selectFrameVersion: (projectId: string, shotId: string, role: "first" | "last", versionId: string) => run(() => selectFrameVersion(projectId, shotId, role, versionId)),
+    deleteFailedFrameJob: (projectId: string, shotId: string, role: "first" | "last") => run(() => deleteFailedFrameJob(projectId, shotId, role)),
     generateAllVideos: (projectId: string) => run(() => generateAllVideos(projectId)),
     assembleProject: (projectId: string) => run(() => assembleProject(projectId)),
   };

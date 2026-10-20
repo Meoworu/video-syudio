@@ -42,10 +42,10 @@ class GoogleTextClient:
             except Exception as error:
                 last_error = error
                 if attempt >= self.settings.google_text_max_retries or not _is_transient(error):
-                    raise GoogleTextError(f"Gemini 文本请求失败：{safe_google_error(error, self.settings)}") from None
+                    raise GoogleTextError(f"Agent Platform 文本请求失败：{safe_google_error(error, self.settings)}") from None
             if attempt < self.settings.google_text_max_retries:
                 time.sleep(self.settings.retry_backoff_seconds * (2 ** attempt))
-        raise GoogleTextError(f"Gemini 文本请求重试耗尽：{safe_google_error(last_error, self.settings)}") from None
+        raise GoogleTextError(f"Agent Platform 文本请求重试耗尽：{safe_google_error(last_error, self.settings)}") from None
 
 
 def _is_transient(error: Exception) -> bool:

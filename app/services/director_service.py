@@ -20,7 +20,7 @@ from app.store.project_store import ProjectStore
 
 
 class DirectorService:
-    """Google Gemini, two-stage story and shot-planning pipeline."""
+    """Google Agent Platform, two-stage story and shot-planning pipeline."""
 
     def __init__(self, settings: Settings, *, client: Any | None = None) -> None:
         self.settings = settings
@@ -67,6 +67,8 @@ class DirectorService:
                 project = store.get(project_id)
                 project.title = designed.title
                 project.directorOutline = designed.directorOutline
+                project.assets = designed.assets
+                project.schemaVersion = designed.schemaVersion
                 project.shots = designed.shots
                 project.editPlan = designed.editPlan
                 project.status = "ready"

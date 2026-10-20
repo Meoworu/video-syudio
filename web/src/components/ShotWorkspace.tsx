@@ -1,21 +1,28 @@
 import { useEffect, useState } from "react";
-import { Alert, App, Button, Card, Collapse, Empty, Input, InputNumber, Select, Space, Tag, Typography, Upload } from "antd";
+import { Alert, App, Button, Card, Collapse, Empty, Input, InputNumber, Popconfirm, Select, Space, Tag, Typography } from "antd";
 import { fileUrl } from "../api";
 import type { Project, Shot } from "../types";
+import { FrameGenerationPanel } from "./FrameGenerationPanel";
 
 type ShotDraft = Pick<Shot, "title" | "prompt" | "durationSeconds" | "transitionIn">;
 const activeStatuses = new Set(["submitting", "generating", "downloading"]);
 const statusLabels: Record<string, [string, string]> = {
   idle: ["待生成", "default"], submitting: ["提交中", "processing"], generating: ["生成中", "processing"],
-  downloading: ["下载中", "processing"], complete: ["已完成", "success"], failed: ["失败", "error"], cancelled: ["已取消", "default"],
+  downloading: ["下载中", "processing"], complete: ["已完成", "success"], failed: ["生成失败", "error"], cancelled: ["已取消", "default"],
 };
 
-function ShotEditor({ project, shot, busy, onUpdate, onUpload, onGenerate, onCancel }: {
+function ShotEditor({ project, shot, busy, onUpdate, onUpload, onGenerate, onCancel, onDeleteFailedVideo, onFrameConfig, onGenerateFrame, onGenerateFrames, onSelectFrameVersion, onDeleteFailedFrame }: {
   project: Project; shot: Shot; busy: boolean;
   onUpdate: (shotId: string, draft: ShotDraft) => Promise<Project | null>;
   onUpload: (shotId: string, role: "first" | "last", file: File) => Promise<Project | null>;
   onGenerate: (shotId: string) => Promise<Project | null>;
   onCancel: (shotId: string) => Promise<Project | null>;
+  onDeleteFailedVideo: (shotId: string) => Promise<Project | null>;
+  onFrameConfig: (shotId: string, role: "first" | "last", config: { prompt: string; referenceMode: "auto" | "manual"; assetIds: string[] }) => Promise<Project | null>;
+  onGenerateFrame: (shotId: string, role: "first" | "last") => Promise<Project | null>;
+  onGenerateFrames: (shotId: string) => Promise<Project | null>;
+  onSelectFrameVersion: (shotId: string, role: "first" | "last", versionId: string) => Promise<Project | null>;
+  onDeleteFailedFrame: (shotId: string, role: "first" | "last") => Promise<Project | null>;
 }) {
   const { message, modal } = App.useApp();
   const [draft, setDraft] = useState<ShotDraft>(() => ({ title: shot.title, prompt: shot.prompt, durationSeconds: shot.durationSeconds, transitionIn: shot.transitionIn }));
@@ -40,27 +47,29 @@ function ShotEditor({ project, shot, busy, onUpdate, onUpload, onGenerate, onCan
     } else await submit();
   }
 
-  async function upload(role: "first" | "last", file: File) {
+  async function upload(role: "first" | "last", file: File): Promise<Project | null> {
     const allowed = ["image/png", "image/jpeg", "image/webp"];
     if (!allowed.includes(file.type)) {
       message.error("请选择 PNG、JPG 或 WebP 图片");
-      return;
+      return null;
     }
-    if (file.size > 20 * 1024 * 1024) {
-      message.error("图片不能超过 20 MB");
-      return;
+    if (file.size > 6_000_000) {
+      message.error("图片不能超过 6 MB");
+      return null;
     }
     const submit = async () => {
       const result = await onUpload(shot.id, role, file);
       if (result) message.success(`${role === "first" ? "首帧" : "尾帧"}已上传`);
+      return result;
     };
     if (shot.video || project.finalVideoPath) {
-      modal.confirm({
+      return new Promise((resolve) => modal.confirm({
         title: `替换${role === "first" ? "首帧" : "尾帧"}素材？`,
         content: "替换素材会清除该镜头已有视频和当前成片，完成后需要重新生成并合成。",
-        okText: "继续上传", cancelText: "返回检查", onOk: submit,
-      });
-    } else await submit();
+        okText: "继续上传", cancelText: "返回检查", onOk: async () => resolve(await submit()), onCancel: () => resolve(null),
+      }));
+    }
+    return submit();
   }
 
   function generate() {
@@ -107,31 +116,34 @@ function ShotEditor({ project, shot, busy, onUpdate, onUpload, onGenerate, onCan
           <Button disabled={busy || active || !draft.title.trim() || !draft.prompt.trim()} onClick={() => void save()}>保存修改</Button>
           <Button type="primary" disabled={busy || active || !shot.uploads.firstFrame || !shot.uploads.lastFrame} loading={busy} onClick={generate}>生成视频</Button>
           {active && <Button danger disabled={busy} onClick={() => void onCancel(shot.id)}>取消任务</Button>}
+          {shot.video?.status === "failed" && <Popconfirm title="删除这条失败记录？" description="该镜头将恢复为待生成状态。" okText="删除" cancelText="取消" onConfirm={() => onDeleteFailedVideo(shot.id)}><Button danger disabled={busy}>删除失败记录</Button></Popconfirm>}
         </Space>
-      </div>
-      <div className="frame-pair">
-        {(["first", "last"] as const).map((role) => {
-          const path = role === "first" ? shot.uploads.firstFrame : shot.uploads.lastFrame;
-          const label = role === "first" ? "首帧" : "尾帧";
-          return <div className="frame-slot" key={role}>
-          <div className="frame-preview">{path ? <img src={fileUrl(project.projectId, path)} alt={`${shot.title}${label}预览`} /> : <Typography.Text type="secondary">上传{label}素材</Typography.Text>}</div>
-            <Upload accept="image/png,image/jpeg,image/webp" maxCount={1} showUploadList={false} beforeUpload={(file) => { void upload(role, file); return false; }}>
-              <Button block disabled={busy || active}>{path ? `替换${label}` : `上传${label}`}</Button>
-            </Upload>
-          </div>;
-        })}
       </div>
     </div>
     {shot.video?.path && <video className="shot-video" controls preload="metadata" src={fileUrl(project.projectId, shot.video.path)} />}
+    <FrameGenerationPanel project={project} shot={shot} busy={busy || active}
+      onConfig={(role, config) => onFrameConfig(shot.id, role, config)}
+      onGenerate={(role) => onGenerateFrame(shot.id, role)}
+      onGeneratePair={() => onGenerateFrames(shot.id)}
+      onSelectVersion={(role, versionId) => onSelectFrameVersion(shot.id, role, versionId)}
+      onDeleteFailed={(role) => onDeleteFailedFrame(shot.id, role)}
+      onUpload={(role, file) => upload(role, file)}
+    />
   </Card>;
 }
 
-export function ShotWorkspace({ project, busy, onUpdate, onUpload, onGenerate, onCancel, onGenerateAll }: {
+export function ShotWorkspace({ project, busy, onUpdate, onUpload, onGenerate, onCancel, onDeleteFailedVideo, onFrameConfig, onGenerateFrame, onGenerateFrames, onSelectFrameVersion, onDeleteFailedFrame, onGenerateAll }: {
   project: Project; busy: boolean;
   onUpdate: (shotId: string, draft: ShotDraft) => Promise<Project | null>;
   onUpload: (shotId: string, role: "first" | "last", file: File) => Promise<Project | null>;
   onGenerate: (shotId: string) => Promise<Project | null>;
   onCancel: (shotId: string) => Promise<Project | null>;
+  onDeleteFailedVideo: (shotId: string) => Promise<Project | null>;
+  onFrameConfig: (shotId: string, role: "first" | "last", config: { prompt: string; referenceMode: "auto" | "manual"; assetIds: string[] }) => Promise<Project | null>;
+  onGenerateFrame: (shotId: string, role: "first" | "last") => Promise<Project | null>;
+  onGenerateFrames: (shotId: string) => Promise<Project | null>;
+  onSelectFrameVersion: (shotId: string, role: "first" | "last", versionId: string) => Promise<Project | null>;
+  onDeleteFailedFrame: (shotId: string, role: "first" | "last") => Promise<Project | null>;
   onGenerateAll: () => Promise<Project | null>;
 }) {
   if (!project.shots.length) return <Empty description="导演正在整理镜头，完成后会显示在这里。" />;
@@ -140,6 +152,6 @@ export function ShotWorkspace({ project, busy, onUpdate, onUpload, onGenerate, o
     <div className="section-heading"><div><Typography.Title level={4}>分镜</Typography.Title><Typography.Text type="secondary">{project.shots.length} 个镜头 · {readyCount} 个可提交生成</Typography.Text></div>
       <Button type="primary" disabled={busy || readyCount === 0} loading={busy} onClick={() => void onGenerateAll()}>批量生成可提交镜头</Button>
     </div>
-    {project.shots.map((shot) => <ShotEditor key={`${project.projectId}-${shot.id}`} project={project} shot={shot} busy={busy} onUpdate={onUpdate} onUpload={onUpload} onGenerate={onGenerate} onCancel={onCancel} />)}
+    {project.shots.map((shot) => <ShotEditor key={`${project.projectId}-${shot.id}`} project={project} shot={shot} busy={busy} onUpdate={onUpdate} onUpload={onUpload} onGenerate={onGenerate} onCancel={onCancel} onDeleteFailedVideo={onDeleteFailedVideo} onFrameConfig={onFrameConfig} onGenerateFrame={onGenerateFrame} onGenerateFrames={onGenerateFrames} onSelectFrameVersion={onSelectFrameVersion} onDeleteFailedFrame={onDeleteFailedFrame} />)}
   </div>;
 }

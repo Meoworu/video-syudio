@@ -5,22 +5,28 @@ from app.config import Settings
 
 
 class GoogleClientConfigError(ValueError):
-    """Raised when Gemini Developer API configuration is incomplete."""
+    """Raised when Agent Platform API key configuration is incomplete."""
 
 
-def build_google_client(settings: Settings) -> Any:
+def build_google_client(settings: Settings, *, timeout_seconds: float | None = None, max_http_attempts: int | None = None) -> Any:
     api_key = settings.google_api_key_value
     if not api_key:
         raise GoogleClientConfigError("未配置 Google API Key，请在 .env 设置 GOOGLE_API_KEY")
+    if not settings.google_cloud_project:
+        raise GoogleClientConfigError("未配置 GOOGLE_CLOUD_PROJECT，请填写绑定 Google Cloud 试用结算账号的项目 ID")
     try:
         from google import genai
     except ImportError as error:  # pragma: no cover
         raise GoogleClientConfigError("未安装 google-genai") from error
+    http_options = {"timeout": round((timeout_seconds or settings.google_http_timeout_seconds) * 1000)}
+    if max_http_attempts is not None:
+        http_options["retry_options"] = {"attempts": max_http_attempts}
     return genai.Client(
-        vertexai=False,
-        enterprise=False,
+        enterprise=True,
+        project=settings.google_cloud_project,
+        location="global",
         api_key=api_key,
-        http_options={"timeout": round(settings.google_http_timeout_seconds * 1000)},
+        http_options=http_options,
     )
 
 

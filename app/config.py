@@ -14,8 +14,13 @@ class Settings(BaseSettings):
     google_api_key: SecretStr | None = Field(default=None, alias="GOOGLE_API_KEY", repr=False)
     gemini_api_key: SecretStr | None = Field(default=None, alias="GEMINI_API_KEY", repr=False)
     google_cloud_api_key: SecretStr | None = Field(default=None, alias="GOOGLE_CLOUD_API_KEY", repr=False)
+    google_cloud_project: str = Field(default="", alias="GOOGLE_CLOUD_PROJECT")
     google_text_model: str = Field(default="gemini-3.6-flash", alias="GOOGLE_TEXT_MODEL")
     google_omni_model: str = Field(default="gemini-omni-flash-preview", alias="GOOGLE_OMNI_MODEL")
+    google_image_model: str = Field(default="gemini-3.1-flash-image", alias="GOOGLE_IMAGE_MODEL")
+    google_image_resolution: str = Field(default="1K", alias="GOOGLE_IMAGE_RESOLUTION")
+    google_image_timeout_seconds: float = Field(default=180.0, gt=0, alias="GOOGLE_IMAGE_TIMEOUT_SECONDS")
+    google_image_max_concurrency: int = Field(default=2, ge=1, le=8, alias="GOOGLE_IMAGE_MAX_CONCURRENCY")
     google_http_timeout_seconds: float = Field(default=120.0, gt=0, alias="GOOGLE_HTTP_TIMEOUT_SECONDS")
     google_request_timeout_seconds: float = Field(default=900.0, gt=0, alias="GOOGLE_REQUEST_TIMEOUT_SECONDS")
     google_poll_interval_seconds: float = Field(default=5.0, gt=0, alias="GOOGLE_POLL_INTERVAL_SECONDS")
@@ -29,6 +34,11 @@ class Settings(BaseSettings):
     minimax_max_retries: int = Field(default=2, ge=0, le=5, alias="MINIMAX_MAX_RETRIES")
     ffmpeg_bin: str = Field(default="ffmpeg", alias="FFMPEG_BIN")
     ffprobe_bin: str = Field(default="ffprobe", alias="FFPROBE_BIN")
+
+    @field_validator("google_cloud_project")
+    @classmethod
+    def trim_cloud_project(cls, value: str) -> str:
+        return value.strip()
 
     @field_validator("google_api_key", "gemini_api_key", "google_cloud_api_key", mode="before")
     @classmethod

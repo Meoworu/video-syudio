@@ -91,3 +91,16 @@ class ProjectStore:
         temporary.replace(path)
         return path
 
+    def save_media(self, project_id: str, relative_path: str, content: bytes) -> Path:
+        root = self.project_dir(project_id).resolve()
+        if relative_path.startswith("/") or "\\" in relative_path:
+            raise ValueError("媒体路径无效")
+        destination = root / relative_path
+        if root not in destination.resolve(strict=False).parents or destination.is_symlink():
+            raise ValueError("媒体路径无效")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        temporary = destination.with_name(f".{destination.name}.tmp")
+        temporary.write_bytes(content)
+        temporary.replace(destination)
+        return destination
+

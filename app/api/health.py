@@ -14,6 +14,7 @@ def health(settings: Settings = Depends(get_settings)) -> dict[str, object]:
         "ok": True,
         "service": "video-studio",
         "googleApiKeyConfigured": bool(settings.google_api_key_value),
+        "googleProjectConfigured": bool(settings.google_cloud_project),
         "minimaxConfigured": bool(settings.minimax_api_key),
     }
 
@@ -22,6 +23,7 @@ def health(settings: Settings = Depends(get_settings)) -> dict[str, object]:
 def readiness(settings: Settings = Depends(get_settings)) -> dict[str, object]:
     checks = {
         "googleApiKey": bool(settings.google_api_key_value),
+        "googleProject": bool(settings.google_cloud_project),
         "minimaxKey": bool(settings.minimax_api_key),
         "ffmpeg": bool(shutil.which(settings.ffmpeg_bin)),
         "ffprobe": bool(shutil.which(settings.ffprobe_bin)),

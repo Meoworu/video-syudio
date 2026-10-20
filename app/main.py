@@ -3,6 +3,7 @@ import asyncio
 from fastapi import FastAPI
 
 from app.api.health import router as health_router
+from app.api.project_assets import router as asset_router
 from app.api.projects import router as project_router
 from app.config import get_settings
 from app.services.director_service import DirectorService
@@ -15,10 +16,11 @@ _RECOVERY_TASKS: set[asyncio.Task] = set()
 app = FastAPI(
     title="video-studio",
     version="0.1.0",
-    description="Google Gemini video studio with MiniMax continuous narration.",
+    description="Google Agent Platform video studio with MiniMax continuous narration.",
 )
 app.include_router(health_router, prefix="/v1")
 app.include_router(project_router, prefix="/v1")
+app.include_router(asset_router, prefix="/v1")
 
 
 @app.on_event("startup")
@@ -32,6 +34,16 @@ async def resume_video_tasks() -> None:
             task.add_done_callback(_RECOVERY_TASKS.discard)
             continue
         for shot in project.shots:
+            for role in ("first", "last"):
+                job = shot.frames[role].job
+                if job and job.status in {"queued", "generating"}:
+                    job.status = "failed"
+                    job.errorMessage = "服务重启时图片任务中断，请手动重新生成"
+                    with store.lock(project.projectId):
+                        current = store.get(project.projectId)
+                        current_shot = next(item for item in current.shots if item.id == shot.id)
+                        current_shot.frames[role].job = job
+                        store.save(current)
             if not shot.video or shot.video.status not in {"submitting", "generating", "downloading"}:
                 continue
             if shot.video.remoteJobId:

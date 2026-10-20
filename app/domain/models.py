@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import unicodedata
+import uuid
+from datetime import datetime, timezone
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
@@ -119,8 +122,70 @@ class ShotUploads(BaseModel):
     lastFrame: str | None = None
 
 
+class AssetImage(BaseModel):
+    imageId: str
+    path: str
+    mimeType: Literal["image/png", "image/jpeg", "image/webp"]
+    size: int = Field(gt=0)
+    width: int = Field(gt=0)
+    height: int = Field(gt=0)
+
+
+class ProjectAsset(BaseModel):
+    id: str
+    kind: Literal["character", "location", "reference"]
+    name: str
+    description: str = ""
+    entityName: str | None = None
+    scopeShotIds: list[str] = Field(default_factory=list)
+    image: AssetImage | None = None
+    revision: int = 0
+
+
+class FrameVersion(BaseModel):
+    id: str
+    path: str
+    source: Literal["generated", "upload", "legacy"] = "generated"
+    generatedAt: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    model: str = ""
+    promptSnapshot: str = ""
+    inputSignature: str = ""
+    referenceSnapshots: list[str] = Field(default_factory=list)
+    firstFrameVersionId: str | None = None
+
+
+class FrameJob(BaseModel):
+    id: str
+    requestId: str
+    groupId: str | None = None
+    status: Literal["queued", "generating", "complete", "failed"] = "queued"
+    errorMessage: str | None = None
+    createdAt: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    inputSnapshot: dict[str, Any] = Field(default_factory=dict)
+
+
+class FrameSlot(BaseModel):
+    referenceMode: Literal["auto", "manual"] = "auto"
+    assetIds: list[str] = Field(default_factory=list)
+    selectedVersionId: str | None = None
+    versions: list[FrameVersion] = Field(default_factory=list)
+    job: FrameJob | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def import_legacy_upload(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        legacy_path = value.pop("_legacyPath", None)
+        if legacy_path and not value.get("versions"):
+            version_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"video-studio:legacy-frame:{legacy_path}"))
+            value["versions"] = [{"id": version_id, "path": legacy_path, "source": "legacy"}]
+            value["selectedVersionId"] = version_id
+        return value
+
+
 class ShotVideo(BaseModel):
-    provider: Literal["google_vertex", "google_gemini"] = "google_gemini"
+    provider: Literal["google_vertex", "google_gemini", "google_agent_platform"] = "google_agent_platform"
     model: str
     status: Literal["idle", "submitting", "generating", "downloading", "complete", "cancelled", "failed"] = "idle"
     remoteJobId: str | None = None
@@ -148,11 +213,38 @@ class Shot(BaseModel):
     lastFrameDescription: str = ""
     firstFramePrompt: str = ""
     lastFramePrompt: str = ""
+    directorFirstFramePrompt: str = ""
+    directorLastFramePrompt: str = ""
     motionBeats: list[MotionBeat] = Field(default_factory=list)
     transitionIn: Literal["hard_cut", "dissolve", "match_cut"] = "hard_cut"
     transitionReason: str = ""
     uploads: ShotUploads = Field(default_factory=ShotUploads)
+    frames: dict[Literal["first", "last"], FrameSlot] = Field(default_factory=lambda: {"first": FrameSlot(), "last": FrameSlot()})
     video: ShotVideo | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_legacy_frames(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        value = dict(value)
+        uploads = value.get("uploads") or {}
+        frames = dict(value.get("frames") or {})
+        for role, key in (("first", "firstFrame"), ("last", "lastFrame")):
+            if role not in frames:
+                frames[role] = {"_legacyPath": uploads.get(key)}
+        value.setdefault("directorFirstFramePrompt", value.get("firstFramePrompt", ""))
+        value.setdefault("directorLastFramePrompt", value.get("lastFramePrompt", ""))
+        value["frames"] = frames
+        return value
+
+    @model_validator(mode="after")
+    def project_selected_frames_to_uploads(self) -> "Shot":
+        for role, key in (("first", "firstFrame"), ("last", "lastFrame")):
+            slot = self.frames[role]
+            selected = next((item for item in slot.versions if item.id == slot.selectedVersionId), None)
+            setattr(self.uploads, key, selected.path if selected else None)
+        return self
 
 
 class Narration(BaseModel):
@@ -177,6 +269,8 @@ class Project(BaseModel):
     story: str
     aspectRatio: Literal["9:16", "16:9"]
     style: str
+    schemaVersion: int = 2
+    assets: list[ProjectAsset] = Field(default_factory=list)
     directorStage: str = "complete"
     directorRequest: dict[str, Any] | None = None
     directorOutline: DirectorOutline | None = None
@@ -186,6 +280,33 @@ class Project(BaseModel):
     narration: Narration = Field(default_factory=Narration)
     finalVideoPath: str | None = None
     errorMessage: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def create_entity_asset_slots(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        value = dict(value)
+        if value.get("assets") or not value.get("directorOutline"):
+            return value
+        outline = value["directorOutline"]
+        if isinstance(outline, DirectorOutline):
+            outline = outline.model_dump(mode="python")
+        project_id = value.get("projectId", "")
+        assets = []
+        for kind, entities in (("character", outline.get("characters", [])), ("location", outline.get("locations", []))):
+            for entity in entities:
+                name = entity.get("name", "").strip()
+                normalized = unicodedata.normalize("NFKC", name).casefold()
+                asset_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"video-studio:{project_id}:{kind}:{normalized}"))
+                assets.append({
+                    "id": asset_id, "kind": kind, "name": name,
+                    "description": entity.get("visualIdentity") or entity.get("description", ""),
+                    "entityName": name,
+                })
+        value["assets"] = assets
+        value.setdefault("schemaVersion", 2)
+        return value
 
 
 class CreateProjectRequest(BaseModel):
@@ -200,6 +321,23 @@ class UpdateShotRequest(BaseModel):
     prompt: str | None = Field(default=None, min_length=1, max_length=8000)
     durationSeconds: int | None = Field(default=None, ge=3, le=10)
     transitionIn: Literal["hard_cut", "dissolve", "match_cut"] | None = None
+
+
+class CreateAssetRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    description: str = Field(default="", max_length=1000)
+    scopeShotIds: list[str] = Field(default_factory=list)
+
+
+class UpdateFrameConfigRequest(BaseModel):
+    prompt: str = Field(min_length=1, max_length=8000)
+    referenceMode: Literal["auto", "manual"] = "auto"
+    assetIds: list[str] = Field(default_factory=list)
+    restoreDefaultPrompt: bool = False
+
+
+class GenerateFrameRequest(BaseModel):
+    requestId: str = Field(min_length=1, max_length=100)
 
 
 class NarrationAudioRequest(BaseModel):

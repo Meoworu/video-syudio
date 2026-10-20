@@ -18,11 +18,27 @@ export type Shot = {
   lastFrameDescription: string;
   firstFramePrompt: string;
   lastFramePrompt: string;
+  directorFirstFramePrompt: string;
+  directorLastFramePrompt: string;
   motionBeats: { startSeconds: number; endSeconds: number; subjectAction: string; cameraAction: string; environmentAction: string }[];
   transitionIn: "hard_cut" | "dissolve" | "match_cut";
   transitionReason: string;
   uploads: { firstFrame?: string | null; lastFrame?: string | null };
+  frames: Record<"first" | "last", FrameSlot>;
   video?: { model: string; status: string; remoteJobId?: string | null; path?: string | null; errorMessage?: string | null } | null;
+};
+
+export type ProjectAsset = {
+  id: string; kind: "character" | "location" | "reference"; name: string; description: string;
+  entityName?: string | null; scopeShotIds: string[];
+  image?: { imageId: string; path: string; mimeType: string; size: number; width: number; height: number } | null;
+  revision: number;
+};
+
+export type FrameSlot = {
+  referenceMode: "auto" | "manual"; assetIds: string[]; selectedVersionId?: string | null;
+  versions: { id: string; path: string; source: "generated" | "upload" | "legacy"; generatedAt: string; model: string; promptSnapshot: string; referenceSnapshots: string[]; firstFrameVersionId?: string | null }[];
+  job?: { id: string; requestId: string; groupId?: string | null; status: "queued" | "generating" | "complete" | "failed"; errorMessage?: string | null } | null;
 };
 
 export type DirectorOutline = {
@@ -39,6 +55,8 @@ export type Project = {
   story: string;
   aspectRatio: "9:16" | "16:9";
   style: string;
+  schemaVersion: number;
+  assets: ProjectAsset[];
   status: string;
   directorStage: string;
   errorMessage?: string | null;

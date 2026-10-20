@@ -3,10 +3,9 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
-import httpx
 import pytest
 
-from app.clients.google_omni_video import GoogleOmniVideoClient, GoogleOmniVideoError
+from app.clients.google_omni_video import GoogleOmniVideoCancelled, GoogleOmniVideoClient, GoogleOmniVideoError
 from app.config import Settings
 
 
@@ -25,23 +24,9 @@ class FakeInteractions:
         return {"status": "cancelled"}
 
 
-class FakeFiles:
-    def __init__(self):
-        self.downloaded = []
-
-    def get(self, *, name):
-        assert name == "files/video-123"
-        return {"state": "ACTIVE"}
-
-    def download(self, *, file, destination):
-        self.downloaded.append(file)
-        destination.write(b"mp4")
-
-
 class FakeClient:
     def __init__(self) -> None:
         self.interactions = FakeInteractions()
-        self.files = FakeFiles()
 
 
 def test_google_omni_submits_both_frames_and_saves_inline_video(tmp_path: Path, monkeypatch) -> None:
@@ -73,41 +58,40 @@ def test_google_omni_submits_both_frames_and_saves_inline_video(tmp_path: Path, 
     assert "label" not in request["input"][0]
     assert request["input"][2]["type"] == "text"
     assert "FIRST_FRAME" in request["input"][2]["text"]
-    assert request["response_format"] == {"type": "video", "aspect_ratio": "9:16"}
-    assert "duration" not in request["response_format"]
+    assert request["response_format"] == [{"type": "video", "aspect_ratio": "9:16", "delivery": "inline", "duration": "5s"}]
     assert "background" not in request["input"][2]
     output = tmp_path / "video.mp4"
     client.save_video(client.wait_for_completion(job_id), output)
     assert output.read_bytes() == b"mp4"
 
 
-def test_google_omni_downloads_gemini_file_uri_through_files_api(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setattr(
-        "app.clients.google_omni_video.subprocess.run",
-        lambda *args, **kwargs: SimpleNamespace(
-            returncode=0,
-            stdout=json.dumps({"streams": [{"codec_type": "video"}], "format": {"duration": "5"}}),
-            stderr="",
-        ),
-    )
-    fake = FakeClient()
-    client = GoogleOmniVideoClient(Settings(_env_file=None), client=fake)
-    output = tmp_path / "video.mp4"
-    interaction = {"status": "completed", "steps": [{"content": [{
-        "type": "video", "uri": "https://generativelanguage.googleapis.com/v1beta/files/video-123:download?alt=media"
-    }]}]}
-
-    client.save_video(interaction, output)
-
-    assert output.read_bytes() == b"mp4"
-    assert fake.files.downloaded == ["https://generativelanguage.googleapis.com/v1beta/files/video-123:download?alt=media"]
-
-
-def test_google_omni_rejects_non_google_file_uri(tmp_path: Path) -> None:
+@pytest.mark.parametrize("uri", [
+    "https://example.com/files/video-123",
+    "https://generativelanguage.googleapis.com/v1beta/files/video-123:download?alt=media",
+    "gs://bucket/video.mp4",
+])
+def test_google_omni_rejects_uri_output_without_requesting_another_service(tmp_path: Path, uri: str) -> None:
     client = GoogleOmniVideoClient(Settings(_env_file=None), client=FakeClient())
-    interaction = {"status": "completed", "steps": [{"content": [{"type": "video", "uri": "https://example.com/files/video-123"}]}]}
+    interaction = {"status": "completed", "outputs": [{"type": "video", "uri": uri}]}
+    output = tmp_path / "video.mp4"
+    with pytest.raises(GoogleOmniVideoError, match="inline"):
+        client.save_video(interaction, output)
+    assert not output.exists()
+    assert not output.with_name("video.part.mp4").exists()
 
-    with pytest.raises(GoogleOmniVideoError, match="URI 无效"):
-        client.save_video(interaction, tmp_path / "video.mp4")
-    assert not (tmp_path / "video.mp4").exists()
 
+def test_google_omni_cancels_inline_write_and_removes_partial(tmp_path: Path) -> None:
+    output = tmp_path / "video.mp4"
+    checks = 0
+
+    def cancel_check():
+        nonlocal checks
+        checks += 1
+        return checks >= 2
+
+    client = GoogleOmniVideoClient(Settings(_env_file=None), client=FakeClient())
+    interaction = {"status": "completed", "outputs": [{"type": "video", "data": base64.b64encode(b"x" * (3 * 1024 * 1024)).decode()}]}
+    with pytest.raises(GoogleOmniVideoCancelled):
+        client.save_video(interaction, output, cancel_check=cancel_check)
+    assert not output.exists()
+    assert not output.with_name("video.part.mp4").exists()

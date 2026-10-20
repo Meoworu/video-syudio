@@ -2,12 +2,10 @@ from __future__ import annotations
 
 import base64
 import binascii
-import re
 import mimetypes
 import json
 import subprocess
 import time
-from urllib.parse import urlparse
 from pathlib import Path
 from typing import Any
 
@@ -20,7 +18,7 @@ class GoogleOmniVideoError(RuntimeError):
 
 
 class GoogleOmniVideoCancelled(GoogleOmniVideoError):
-    """Raised when a video download is stopped after local cancellation."""
+    """Raised when saving a video is stopped after local cancellation."""
 
 
 class _CancelableWriter:
@@ -28,7 +26,7 @@ class _CancelableWriter:
         self.destination = destination
         self.cancel_check = cancel_check
 
-    def write(self, chunk: bytes) -> int:
+    def write(self, chunk: bytes | memoryview) -> int:
         if self.cancel_check and self.cancel_check():
             raise GoogleOmniVideoCancelled("视频任务已取消")
         return self.destination.write(chunk)
@@ -64,7 +62,10 @@ class GoogleOmniVideoClient:
                 ],
                 background=True,
                 store=True,
-                response_format={"type": "video", "aspect_ratio": aspect_ratio},
+                response_format=[{
+                    "type": "video", "aspect_ratio": aspect_ratio,
+                    "delivery": "inline", "duration": f"{duration_seconds}s",
+                }],
                 generation_config={"video_config": {"task": "image_to_video"}},
             )
         except Exception as error:
@@ -118,9 +119,13 @@ class GoogleOmniVideoClient:
         uri = _read(video, "uri") or _read(video, "gcs_uri")
         try:
             if data:
-                partial_path.write_bytes(base64.b64decode(str(data), validate=True))
+                video_bytes = memoryview(base64.b64decode(str(data), validate=True))
+                with partial_path.open("wb") as output_file:
+                    writer = _CancelableWriter(output_file, cancel_check)
+                    for offset in range(0, len(video_bytes), 1024 * 1024):
+                        writer.write(video_bytes[offset:offset + 1024 * 1024])
             elif uri:
-                self._download_gemini_file(str(uri), partial_path, cancel_check=cancel_check)
+                raise GoogleOmniVideoError("Agent Platform 未返回 inline 视频数据；请确认任务使用 delivery=inline，URI 输出无法直接保存")
             else:
                 raise GoogleOmniVideoError("Google Omni 返回了不支持的视频位置")
             if cancel_check and cancel_check():
@@ -145,40 +150,6 @@ class GoogleOmniVideoClient:
         except Exception as error:
             partial_path.unlink(missing_ok=True)
             raise GoogleOmniVideoError(f"视频校验失败：{safe_google_error(error, self.settings)}") from None
-
-    def _download_gemini_file(self, uri: str, destination: Path, *, cancel_check=None) -> None:
-        if uri.startswith("files/"):
-            resource = uri
-        else:
-            parsed = urlparse(uri)
-            if parsed.scheme != "https" or parsed.hostname != "generativelanguage.googleapis.com":
-                raise GoogleOmniVideoError("Gemini 返回的文件 URI 无效")
-            resource = parsed.path.removeprefix("/v1beta/")
-        if not re.fullmatch(r"files/[A-Za-z0-9_-]+(?::download)?", resource):
-            raise GoogleOmniVideoError("Gemini 返回的文件 URI 无效")
-        file_name = resource.split(":", 1)[0]
-        deadline = time.monotonic() + self.settings.google_request_timeout_seconds
-        while True:
-            if cancel_check and cancel_check():
-                raise GoogleOmniVideoCancelled("视频任务已取消")
-            info = self.client.files.get(name=file_name)
-            raw_state = _read(info, "state")
-            state = str(_read(raw_state, "value") or _read(raw_state, "name") or raw_state or "").upper().split(".")[-1]
-            if state == "ACTIVE":
-                break
-            if state == "FAILED":
-                raise GoogleOmniVideoError("Gemini 视频文件处理失败")
-            if time.monotonic() >= deadline:
-                raise GoogleOmniVideoError("Gemini 视频文件等待超时")
-            time.sleep(self.settings.google_poll_interval_seconds)
-        if cancel_check and cancel_check():
-            raise GoogleOmniVideoCancelled("视频任务已取消")
-        download_uri = f"https://generativelanguage.googleapis.com/v1beta/{file_name}:download?alt=media"
-        with destination.open("wb") as output_file:
-            self.client.files.download(
-                file=download_uri,
-                destination=_CancelableWriter(output_file, cancel_check),
-            )
 
     @staticmethod
     def _image_input(path: Path) -> dict[str, Any]:

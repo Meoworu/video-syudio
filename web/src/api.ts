@@ -38,6 +38,42 @@ export function uploadFrame(projectId: string, shotId: string, role: "first" | "
   return request<{ path: string }>(`/projects/${projectId}/shots/${shotId}/frames/${role}`, { method: "POST", headers: { "Content-Type": file.type || "image/png" }, body: file });
 }
 
+export function createAsset(projectId: string, payload: { name: string; description?: string; scopeShotIds: string[] }) {
+  return request<Project>(`/projects/${projectId}/assets`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+}
+
+export function updateAsset(projectId: string, assetId: string, payload: { name: string; description?: string; scopeShotIds: string[] }) {
+  return request<Project>(`/projects/${projectId}/assets/${assetId}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+}
+
+export function uploadAssetImage(projectId: string, assetId: string, file: File) {
+  return request<Project>(`/projects/${projectId}/assets/${assetId}/image`, { method: "POST", headers: { "Content-Type": file.type }, body: file });
+}
+
+export function deleteAsset(projectId: string, assetId: string) {
+  return request<Project>(`/projects/${projectId}/assets/${assetId}`, { method: "DELETE" });
+}
+
+export function updateFrameConfig(projectId: string, shotId: string, role: "first" | "last", payload: { prompt: string; referenceMode: "auto" | "manual"; assetIds: string[]; restoreDefaultPrompt?: boolean }) {
+  return request<Project>(`/projects/${projectId}/shots/${shotId}/frames/${role}/config`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+}
+
+export function generateFrame(projectId: string, shotId: string, role: "first" | "last", requestId: string) {
+  return request<Project>(`/projects/${projectId}/shots/${shotId}/frames/${role}/generate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ requestId }) });
+}
+
+export function generateFrames(projectId: string, shotId: string, requestId: string) {
+  return request<Project>(`/projects/${projectId}/shots/${shotId}/generate-frames`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ requestId }) });
+}
+
+export function selectFrameVersion(projectId: string, shotId: string, role: "first" | "last", versionId: string) {
+  return request<Project>(`/projects/${projectId}/shots/${shotId}/frames/${role}/versions/${versionId}/select`, { method: "POST" });
+}
+
+export function deleteFailedFrameJob(projectId: string, shotId: string, role: "first" | "last") {
+  return request<Project>(`/projects/${projectId}/shots/${shotId}/frames/${role}/failed-job`, { method: "DELETE" });
+}
+
 export function generateVideo(projectId: string, shotId: string) {
   return request<Project>(`/projects/${projectId}/shots/${shotId}/generate-video`, { method: "POST" });
 }
@@ -68,6 +104,10 @@ export function generateAllVideos(projectId: string) {
 
 export function cancelVideo(projectId: string, shotId: string) {
   return request<Project>(`/projects/${projectId}/shots/${shotId}/cancel-video`, { method: "POST" });
+}
+
+export function deleteFailedVideo(projectId: string, shotId: string) {
+  return request<Project>(`/projects/${projectId}/shots/${shotId}/video`, { method: "DELETE" });
 }
 
 export function selectNarrationTake(projectId: string, takeId: string) {

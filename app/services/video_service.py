@@ -58,8 +58,8 @@ class VideoService:
                     return
                 if shot.video and shot.video.status == "complete":
                     return
-                if shot.video and shot.video.provider == "google_vertex":
-                    raise ValueError("此任务属于旧 Vertex API，无法用 Gemini API Key 恢复；请确认旧任务后重新提交")
+                if shot.video and shot.video.provider != "google_agent_platform":
+                    raise ValueError("此任务属于旧服务端点，无法用当前 Agent Platform API Key 恢复；请确认旧任务后重新提交")
                 job_id = shot.video.remoteJobId if shot.video else None
                 if not job_id:
                     shot.video = ShotVideo(model=self.settings.google_omni_model, status="submitting")
@@ -174,8 +174,8 @@ class VideoService:
                 raise ValueError("镜头没有正在运行的视频任务")
             if shot.video.status not in {"submitting", "generating", "downloading"}:
                 raise ValueError("镜头视频任务当前不可取消")
-            if shot.video.provider == "google_vertex":
-                raise ValueError("此任务属于旧 Vertex API，无法通过 Gemini API Key 取消；请在 Google Cloud 控制台处理后重新提交")
+            if shot.video.provider != "google_agent_platform":
+                raise ValueError("此任务属于旧服务端点，无法用当前 Agent Platform API Key 取消；请在原服务平台处理后重新提交")
             remote_job_id = shot.video.remoteJobId
             if not remote_job_id:
                 shot.video.status = "cancelled"

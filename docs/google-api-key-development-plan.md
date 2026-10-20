@@ -1,6 +1,6 @@
 # Development Plan: Google API Key 调用迁移
 
-编写日期：2026-10-19。状态：实现完成；真实服务联调仍待执行。
+编写日期：2026-10-19。状态：已被替代。本文保留为历史设计记录；用户已明确需要 Google Cloud 试用赠金，当前目标改为 Agent Platform API Key 接入，详见 [最新接入说明](agent-platform-api-key-development.md)。下文 Developer API 方案不再作为当前配置依据。
 
 ## 1. Requirement Understanding
 

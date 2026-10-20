@@ -15,7 +15,9 @@ cd web && npm ci
 
 ## 配置服务商
 
-在 `.env` 填写 `GOOGLE_API_KEY` 和 `MINIMAX_API_KEY`。`GEMINI_API_KEY`、`GOOGLE_CLOUD_API_KEY` 可作为 Google Key 的备用名称。Google API Key 仅由后端读取，不要放入前端配置。`GOOGLE_HTTP_TIMEOUT_SECONDS` 设置单次 Google 请求的超时，默认 120 秒。
+在 `.env` 填写 `GOOGLE_CLOUD_PROJECT`、`GOOGLE_API_KEY` 和 `MINIMAX_API_KEY`。Cloud 项目必须关联持有试用赠金的结算账号，启用 Agent Platform API，并授权 Key 绑定的服务账号。Key 保持限制为 Agent Platform API。`GEMINI_API_KEY`、`GOOGLE_CLOUD_API_KEY` 可作为 Google Key 的备用名称。Google Cloud API Key 仅由后端读取，不要放入前端配置。`GOOGLE_HTTP_TIMEOUT_SECONDS` 设置文字/视频请求的超时，默认 120 秒。
+
+图片生成也使用同一 Google Cloud Agent Platform API Key 和项目，不调用 Gemini Developer API。默认模型为 `gemini-3.1-flash-image`；`GOOGLE_IMAGE_MODEL` 可更换模型，`GOOGLE_IMAGE_RESOLUTION` 设置输出尺寸（默认 `1K`），`GOOGLE_IMAGE_TIMEOUT_SECONDS` 默认 180 秒，`GOOGLE_IMAGE_MAX_CONCURRENCY` 默认限制为 2 个并发任务。图片用量是否由试用赠金抵扣，以 Cloud Billing 的服务范围和账单记录为准。
 
 如果 FFmpeg 不在 `PATH`，在 `.env` 设置 `FFMPEG_BIN` 和 `FFPROBE_BIN` 的可执行文件路径。仅浏览界面和调用健康检查时，可以暂不配置服务商凭据；生成内容需要这些配置。
 
@@ -34,7 +36,17 @@ cd web
 npm run dev
 ```
 
-打开 `http://127.0.0.1:5173/`。Vite 会将 `/v1` 代理到 `http://127.0.0.1:8010`。可用 `/v1/health` 检查 API 是否运行，用 `/v1/ready` 检查 Google API Key、MiniMax、FFmpeg 等配置。
+打开 `http://127.0.0.1:5173/`。Vite 会将 `/v1` 代理到 `http://127.0.0.1:8010`。可用 `/v1/health` 检查 API 是否运行，用 `/v1/ready` 检查 Google Cloud 项目、API Key、MiniMax、FFmpeg 等配置。
+
+## 资产与首尾帧流程
+
+1. 创建项目并等待导演规划完成。导演角色和场景会自动成为资产项。
+2. 打开「资产」页，为角色和场景上传 PNG、JPG 或 WebP 参考图；单张图片最多 6 MB、40 MP。可新增其他参考图并指定适用镜头。
+3. 在「分镜」中调整首帧、尾帧提示词和参考资产。默认按镜头角色/场景自动关联；也可切换为手动选择。
+4. 点击单帧生成，或「一键生成首尾帧」。一键操作按首帧、尾帧顺序执行；生成失败会显示错误，可删除失败记录后重试。可再次生成并在历史版本间切换。
+5. 首尾帧就绪后，沿用镜头卡片的「生成视频」流程。新生成或切换帧版本后，当前镜头视频与成片需要重新生成。
+
+参考资产是供图片模型参考的素材，不会直接替代最终首尾帧。手动上传首尾帧仍可用于跳过图片生成。
 
 ## 本地检查
 
@@ -45,3 +57,5 @@ cd web && npm run build
 ```
 
 真实服务商调用和完整流程的验收步骤见 [联调验收清单](docs/acceptance-runbook.md)。
+
+Google 请求固定使用 Agent Platform 的 `aiplatform.googleapis.com`，区域为 `global`；无需本机 ADC 登录。赠金抵扣、余额和有效期以 Cloud Billing 为准。视频请求使用 inline 输出，保留取消和临时文件清理。旧端点任务需在原平台处理后重新提交。详见 [接入说明](docs/agent-platform-api-key-development.md)。

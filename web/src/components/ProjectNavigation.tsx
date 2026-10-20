@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button, Drawer, Empty, Form, Input, InputNumber, List, Select, Space, Tag, Typography } from "antd";
+import { Button, Drawer, Empty, Form, Input, InputNumber, List, Popconfirm, Select, Space, Tag, Typography } from "antd";
 import { fileUrl } from "../api";
 import type { CreateProjectInput } from "../hooks/useStudioWorkspace";
 import type { Project } from "../types";
@@ -9,7 +9,7 @@ type VideoJob = { projectId: string; projectTitle: string; shotId: string; shotT
 function videoStatus(status: string) {
   const labels: Record<string, [string, string]> = {
     submitting: ["提交中", "processing"], generating: ["生成中", "processing"], downloading: ["下载中", "processing"],
-    complete: ["已完成", "success"], failed: ["失败", "error"], cancelled: ["已取消", "default"], idle: ["待生成", "default"],
+    complete: ["已完成", "success"], failed: ["生成失败", "error"], cancelled: ["已取消", "default"], idle: ["待生成", "default"],
   };
   return labels[status] || [status, "default"];
 }
@@ -47,9 +47,10 @@ function CreateProjectDrawer({ open, busy, onClose, onCreate }: {
   </Drawer>;
 }
 
-export function ProjectNavigation({ projects, selectedId, jobs, busy, loading, onSelect, onCreate }: {
+export function ProjectNavigation({ projects, selectedId, jobs, busy, loading, onSelect, onCreate, onDeleteFailedVideo }: {
   projects: Project[]; selectedId?: string; jobs: VideoJob[]; busy: boolean; loading: boolean;
   onSelect: (id: string) => void; onCreate: (payload: CreateProjectInput) => Promise<Project | null>;
+  onDeleteFailedVideo: (projectId: string, shotId: string) => Promise<Project | null>;
 }) {
   const [createOpen, setCreateOpen] = useState(false);
   const [jobsOpen, setJobsOpen] = useState(false);
@@ -74,7 +75,7 @@ export function ProjectNavigation({ projects, selectedId, jobs, busy, loading, o
     <Drawer title="视频任务" open={jobsOpen} onClose={() => setJobsOpen(false)} width="min(420px, 100vw)">
       {jobs.length ? <List dataSource={jobs} renderItem={(job) => {
         const [label, color] = videoStatus(job.status);
-        return <List.Item key={`${job.projectId}-${job.shotId}`}>
+        return <List.Item key={`${job.projectId}-${job.shotId}`} actions={job.status === "failed" ? [<Popconfirm key="delete" title="删除这条失败记录？" description="该镜头将恢复为待生成状态。" okText="删除" cancelText="取消" onConfirm={() => onDeleteFailedVideo(job.projectId, job.shotId)}><Button type="link" danger disabled={busy}>删除</Button></Popconfirm>] : undefined}>
           <Space direction="vertical" size={4} className="job-item">
             <Space wrap><Typography.Text strong>{job.projectTitle}</Typography.Text><Tag color={color}>{label}</Tag></Space>
             <Typography.Text>{job.shotTitle}</Typography.Text>
