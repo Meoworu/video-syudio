@@ -27,6 +27,15 @@ class FakeScienceTextClient:
         return {"manuscript": "水受热后蒸发，变成水汽上升。"}
 
 
+class CaptureTextClient(FakeTextClient):
+    def __init__(self):
+        self.prompt = ""
+
+    def generate_json(self, prompt):
+        self.prompt = prompt
+        return {"manuscript": "沿着原文继续。"}
+
+
 def test_narration_uses_google_text_and_minimax_audio(tmp_path: Path) -> None:
     store = ProjectStore(tmp_path)
     project = Project(
@@ -65,4 +74,32 @@ def test_science_narration_uses_explanatory_grounded_rules(tmp_path: Path) -> No
     result = service.generate_manuscript(project)
 
     assert result.narration.manuscript == "水受热后蒸发，变成水汽上升。"
+
+
+def test_source_preserving_narration_uses_script_and_never_legacy_outline(tmp_path: Path) -> None:
+    from app.domain.models import ProductionScript
+    from app.services.story_source import source_hash, split_source
+
+    story = "  原文中的动作。\n"
+    segment = split_source(story)[0]
+    script = ProductionScript(
+        sourceHash=source_hash(story), sourceSegments=[segment],
+        scenes=[{"index": 0, "title": "场景", "sourceSegmentIds": [segment.id], "beats": [
+            {"text": story, "sourceSegmentIds": [segment.id]},
+        ]}],
+    )
+    client = CaptureTextClient()
+    project = Project(
+        projectId="video_source1234", title="标题", story=story, aspectRatio="9:16", style="style",
+        directorMode="source_preserving", productionScript=script,
+        directorOutline={"title": "旧大纲", "logline": "不应读取", "synopsis": "不应读取", "theme": "", "characters": [], "locations": [], "scenes": [], "styleBible": {}},
+        shots=[Shot(id="shot_001", index=0, title="动作", prompt="镜头", durationSeconds=5)],
+    )
+    store = ProjectStore(tmp_path)
+    store.create(project)
+    result = NarrationService(Settings(_env_file=None), store, text_client=client, speech_client=FakeSpeechClient()).generate_manuscript(project)
+    assert result.story == story
+    assert "经原文引用校验的制作剧本" in client.prompt
+    assert "不应读取" not in client.prompt
+    assert story in client.prompt
 

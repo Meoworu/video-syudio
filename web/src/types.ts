@@ -5,6 +5,8 @@ export type Shot = {
   prompt: string;
   durationSeconds: number;
   sceneIndex: number;
+  sourceBeatIndex?: number | null;
+  sourceSegmentIds: string[];
   beat: string;
   narrativePurpose: string;
   camera: string;
@@ -49,11 +51,27 @@ export type DirectorOutline = {
   styleBible: Record<string, string>;
 };
 
+export type ProductionScript = {
+  schemaVersion: number;
+  sourceHash: string;
+  inputSignature: string;
+  sourceSegments: { id: string; index: number; text: string }[];
+  scenes: {
+    index: number; title: string; sourceSegmentIds: string[]; locationName: string; timeOfDay: string;
+    beats: { kind: "action" | "dialogue" | "information"; text: string; sourceSegmentIds: string[] }[];
+    characterReferences: { characterName: string; quote: string; sourceSegmentIds: string[] }[];
+  }[];
+  characters: { name: string; description: string; visualIdentity: string; sourceSegmentIds: string[] }[];
+  locations: { name: string; description: string; visualIdentity: string; sourceSegmentIds: string[] }[];
+  styleBible: Record<string, string>;
+};
+
 export type Project = {
   projectId: string;
   title: string;
   story: string;
   projectType: "story" | "science";
+  directorMode: "legacy_outline" | "source_preserving";
   aspectRatio: "9:16" | "16:9";
   style: string;
   schemaVersion: number;
@@ -62,6 +80,7 @@ export type Project = {
   directorStage: string;
   errorMessage?: string | null;
   directorOutline?: DirectorOutline | null;
+  productionScript?: ProductionScript | null;
   editPlan: { shotIndex: number; timelineStart: number; timelineEnd: number; sourceIn: number; sourceOut: number; transitionIn: string; transitionReason: string }[];
   finalVideoPath?: string | null;
   shots: Shot[];

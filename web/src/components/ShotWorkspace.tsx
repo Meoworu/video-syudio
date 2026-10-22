@@ -28,6 +28,9 @@ function ShotEditor({ project, shot, busy, onUpdate, onUpload, onGenerate, onCan
   const [draft, setDraft] = useState<ShotDraft>(() => ({ title: shot.title, prompt: shot.prompt, durationSeconds: shot.durationSeconds, transitionIn: shot.transitionIn }));
   const active = activeStatuses.has(shot.video?.status || "");
   const [statusLabel, statusColor] = statusLabels[shot.video?.status || "idle"] || [shot.video?.status || "待生成", "default"];
+  const sourceText = project.productionScript?.sourceSegments
+    .filter((segment) => shot.sourceSegmentIds.includes(segment.id))
+    .map((segment) => segment.text).join("");
 
   useEffect(() => {
     setDraft({ title: shot.title, prompt: shot.prompt, durationSeconds: shot.durationSeconds, transitionIn: shot.transitionIn });
@@ -84,6 +87,7 @@ function ShotEditor({ project, shot, busy, onUpdate, onUpload, onGenerate, onCan
   }
 
   const details = [
+    { key: "source", label: "原文出处", children: sourceText ? <Typography.Paragraph className="preserve-copy">{sourceText}</Typography.Paragraph> : project.directorMode === "legacy_outline" ? "旧项目无原文出处" : "尚无原文出处" },
     { key: "purpose", label: "叙事作用", children: shot.narrativePurpose || shot.beat || "—" },
     { key: "camera", label: "摄影说明", children: shot.camera || "—" },
     { key: "visual", label: "画面描述", children: shot.visualDescription || "—" },

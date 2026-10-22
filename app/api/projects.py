@@ -91,11 +91,14 @@ def retry_director(
         project = get_project(project_id, store)
         if not project.directorRequest or project.status == "generating":
             raise HTTPException(status_code=409, detail="项目没有可恢复的导演任务")
+        service = DirectorService(settings)
+        if not service.can_migrate_legacy_project(project):
+            raise HTTPException(status_code=409, detail="旧项目已有分镜或制作素材，不能安全迁移；请新建项目以保留现有内容")
         project.status = "generating"
-        project.directorStage = "shot_design" if project.directorOutline else "outline"
+        project.directorStage = "shot_design" if project.productionScript else "script_breakdown"
         project.errorMessage = None
         store.save(project)
-        background_tasks.add_task(DirectorService(settings).run_project, project_id, store)
+        background_tasks.add_task(service.run_project, project_id, store)
         return project
 
 

@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 import pytest
 
 from app.api.projects import get_store
-from app.domain.models import FrameJob, Project, Shot, ShotVideo
+from app.domain.models import CreateProjectRequest, FrameJob, Project, Shot, ShotVideo
 from app.main import app
 from app.store.project_store import ProjectStore
 
@@ -147,4 +147,23 @@ def test_delete_project_rejects_symlink_and_preserves_target(tmp_path: Path) -> 
 
     assert response.status_code == 400
     assert target_media.read_bytes() == b"keep"
+
+
+def test_director_retry_refuses_to_migrate_legacy_project_with_existing_shot(tmp_path: Path) -> None:
+    store = ProjectStore(tmp_path)
+    request = CreateProjectRequest(story="原文故事。", sceneCount=1)
+    project = Project(
+        projectId="video_legacyretry12", title="旧项目", story=request.story,
+        aspectRatio=request.aspectRatio, style=request.style, status="failed",
+        directorRequest=request.model_dump(mode="json"),
+        shots=[Shot(id="shot_001", index=0, title="用户制作的镜头", prompt="保留", durationSeconds=5)],
+    )
+    store.create(project)
+    app.dependency_overrides[get_store] = lambda: store
+    try:
+        response = TestClient(app).post(f"/v1/projects/{project.projectId}/director/retry")
+    finally:
+        app.dependency_overrides.pop(get_store, None)
+    assert response.status_code == 409
+    assert store.get(project.projectId).shots[0].title == "用户制作的镜头"
 

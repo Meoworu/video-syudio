@@ -1,12 +1,15 @@
 import { Alert, Button, Card, Collapse, Descriptions, Empty, Space, Tag, Typography } from "antd";
 import type { Project } from "../types";
+import { getVideoStyleLabel } from "../videoStyles";
 
 function ProjectState({ project }: { project: Project }) {
   if (project.status === "generating") {
-    const stages: Record<string, string> = project.projectType === "science"
-      ? { outline: "正在规划科普大纲", shot_design: "正在设计知识讲解镜头" }
-      : { outline: "正在构思故事大纲", shot_design: "正在设计场景与镜头" };
-    return <Alert showIcon type="info" message="导演正在规划项目" description={stages[project.directorStage] || "完成后页面会自动更新。"} />;
+    const stages: Record<string, string> = {
+      script_breakdown: "正在按原文拆解制作剧本",
+      shot_design: "正在设计镜头并关联原文出处",
+      outline: "旧项目导演规划恢复中",
+    };
+    return <Alert showIcon type="info" message="正在制作" description={stages[project.directorStage] || "完成后页面会自动更新。"} />;
   }
   if (project.status === "failed") return <Alert showIcon type="error" message="导演规划失败" description={project.errorMessage || "请检查配置后重试。"} />;
   return <Tag color="success">分镜已就绪</Tag>;
@@ -43,6 +46,7 @@ function EditTimeline({ project }: { project: Project }) {
 
 export function ProjectOverview({ project, busy, onRetry }: { project: Project; busy: boolean; onRetry: () => void }) {
   const outline = project.directorOutline;
+  const script = project.productionScript;
   const outlineItems = outline ? [
     ...(project.projectType === "science" ? [] : [{ key: "characters", label: `角色 · ${outline.characters.length}`, children: outline.characters.length ? <div className="detail-grid">{outline.characters.map((character) => <Card size="small" key={character.name}><Typography.Text strong>{character.name}</Typography.Text><Typography.Paragraph>{character.description}</Typography.Paragraph><Typography.Text type="secondary">外观：{character.visualIdentity}</Typography.Text></Card>)}</div> : <Empty description="暂无角色信息" /> }]),
     { key: "locations", label: `场景资产 · ${outline.locations.length}`, children: outline.locations.length ? <div className="detail-grid">{outline.locations.map((location) => <Card size="small" key={location.name}><Typography.Text strong>{location.name}</Typography.Text><Typography.Paragraph>{location.description}</Typography.Paragraph><Typography.Text type="secondary">视觉锚点：{location.visualIdentity}</Typography.Text></Card>)}</div> : <Empty description="暂无场景资产" /> },
@@ -53,12 +57,12 @@ export function ProjectOverview({ project, busy, onRetry }: { project: Project; 
   return <div className="overview-stack">
     <Card className="hero-card">
       <div className="project-hero-top"><div><Typography.Text className="eyebrow">项目概览</Typography.Text><Typography.Title level={2}>{project.title}</Typography.Title></div><ProjectState project={project} /></div>
-      <Typography.Paragraph className="project-story">{project.story}</Typography.Paragraph>
+      <Typography.Paragraph className="project-story preserve-copy">{project.story}</Typography.Paragraph>
       <Descriptions size="small" column={{ xs: 1, sm: 3 }} items={[
         { key: "type", label: "项目类型", children: project.projectType === "science" ? "科普" : "普通故事" },
         { key: "aspect", label: "画面比例", children: project.aspectRatio },
         { key: "shots", label: "镜头数", children: `${project.shots.length} 个` },
-        { key: "style", label: "视觉风格", children: project.style },
+        { key: "style", label: "视觉风格", children: getVideoStyleLabel(project.style) },
       ]} />
       {project.status === "failed" && <Button className="retry-button" onClick={onRetry} loading={busy}>重试导演规划</Button>}
     </Card>
@@ -69,11 +73,23 @@ export function ProjectOverview({ project, busy, onRetry }: { project: Project; 
       {outline.theme && <Typography.Paragraph><Typography.Text strong>主题：</Typography.Text>{outline.theme}</Typography.Paragraph>}
       <Collapse ghost items={outlineItems} />
     </Card>}
-    {!outline && project.status !== "generating" && project.status !== "failed" && <Empty className="overview-empty" description="项目大纲尚未生成" />}
+    {script && <Card className="section-card" title="忠实剧本拆解" extra={<Tag color="success">{script.scenes.length} 个场景</Tag>}>
+      <Typography.Paragraph type="secondary">以下行动和台词均关联用户原文；原文保存在上方，镜头设计不会回写。</Typography.Paragraph>
+      <div className="scene-list">{script.scenes.map((scene) => <div className="scene-row" key={scene.index}>
+        <Tag>{String(scene.index + 1).padStart(2, "0")}</Tag><div>
+          <Typography.Text strong>{scene.title}</Typography.Text>
+          <Typography.Paragraph type="secondary">{scene.locationName}{scene.timeOfDay ? ` · ${scene.timeOfDay}` : ""}</Typography.Paragraph>
+          {scene.beats.map((beat, index) => <Typography.Paragraph className="preserve-copy" key={`${scene.index}-${index}`}>
+            <Tag>{beat.kind === "dialogue" ? "台词原文" : beat.kind === "information" ? "信息原文" : "行动原文"}</Tag>{beat.text}
+          </Typography.Paragraph>)}
+        </div>
+      </div>)}</div>
+    </Card>}
+    {!outline && !script && project.status !== "generating" && project.status !== "failed" && <Empty className="overview-empty" description="尚无导演拆解结果" />}
     <EditTimeline project={project} />
     <Card className="section-card" title="制作进度">
       <Space wrap size={[8, 8]}>
-        <Tag color={project.directorOutline ? "success" : project.status === "failed" ? "error" : "processing"}>导演规划{project.directorOutline ? "完成" : project.status === "failed" ? "失败" : "处理中"}</Tag>
+        <Tag color={project.directorOutline || script ? "success" : project.status === "failed" ? "error" : "processing"}>{project.directorMode === "source_preserving" ? "原文拆解" : "导演规划"}{project.directorOutline || script ? "完成" : project.status === "failed" ? "失败" : "处理中"}</Tag>
         <Tag color={project.shots.length && project.shots.every((shot) => shot.uploads.firstFrame && shot.uploads.lastFrame) ? "success" : "default"}>首尾帧素材</Tag>
         <Tag color={project.shots.length && project.shots.every((shot) => shot.video?.status === "complete") ? "success" : "default"}>镜头视频</Tag>
         <Tag color={project.narration.audioPath ? "success" : "default"}>连续旁白</Tag>

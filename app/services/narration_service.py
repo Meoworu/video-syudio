@@ -28,7 +28,12 @@ class NarrationService:
             f"叙事作用：{shot.narrativePurpose}"
             for shot in sorted(project.shots, key=lambda item: item.index)
         )
-        outline = project.directorOutline.model_dump(mode="json") if project.directorOutline else {}
+        if project.directorMode == "source_preserving":
+            story_context = project.productionScript.model_dump(mode="json") if project.productionScript else {}
+            context_label = "经原文引用校验的制作剧本"
+        else:
+            story_context = project.directorOutline.model_dump(mode="json") if project.directorOutline else {}
+            context_label = "导演大纲（旧项目兼容）"
         video_duration = project_duration(project)
         target = video_duration * 0.84
         narration_role = (
@@ -45,7 +50,7 @@ class NarrationService:
             '{"voiceStyle":"声音风格","voiceDirection":"表演指导", "sentences":[{"id":"narration_000",'
             '"order":0,"text":"完整句。","narrativeFunction":"叙事功能","sourceShotIndexes":[0],'
             '"emotion":"情绪","delivery":"表达方式","paceClass":"natural","pauseAfterSeconds":0.2}]}。'
-            f"\n故事：{project.story}\n导演大纲：{json.dumps(outline, ensure_ascii=False)}\n分镜：\n{shot_context}"
+            f"\n用户原文（保持原样）：{project.story}\n{context_label}：{json.dumps(story_context, ensure_ascii=False)}\n分镜：\n{shot_context}"
         )
         result = self.text_client.generate_json(prompt)
         raw_sentences = result.get("sentences")

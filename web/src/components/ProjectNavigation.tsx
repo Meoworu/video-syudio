@@ -4,8 +4,10 @@ import { DeleteOutlined } from "@ant-design/icons";
 import { fileUrl } from "../api";
 import type { CreateProjectInput } from "../hooks/useStudioWorkspace";
 import type { Project } from "../types";
+import { getVideoStylePrompt, VIDEO_STYLE_PRESETS, type VideoStylePreset } from "../videoStyles";
 
 type VideoJob = { projectId: string; projectTitle: string; shotId: string; shotTitle: string; status: string; path?: string | null; errorMessage?: string | null };
+type CreateProjectFormValues = Omit<CreateProjectInput, "style"> & { stylePreset: VideoStylePreset; customStyle?: string };
 
 function videoStatus(status: string) {
   const labels: Record<string, [string, string]> = {
@@ -18,11 +20,19 @@ function videoStatus(status: string) {
 function CreateProjectDrawer({ open, busy, onClose, onCreate }: {
   open: boolean; busy: boolean; onClose: () => void; onCreate: (payload: CreateProjectInput) => Promise<Project | null>;
 }) {
-  const [form] = Form.useForm<CreateProjectInput>();
+  const [form] = Form.useForm<CreateProjectFormValues>();
   const projectType = Form.useWatch("projectType", form) || "story";
+  const stylePreset = Form.useWatch("stylePreset", form) || "cinematic_realism";
 
-  async function submit(values: CreateProjectInput) {
-    const result = await onCreate({ ...values, projectType: values.projectType || "story", story: values.story.trim(), style: values.style.trim() });
+  async function submit(values: CreateProjectFormValues) {
+    const style = values.stylePreset === "custom" ? values.customStyle?.trim() || "" : getVideoStylePrompt(values.stylePreset);
+    const result = await onCreate({
+      projectType: values.projectType || "story",
+      story: values.story,
+      aspectRatio: values.aspectRatio,
+      sceneCount: values.sceneCount,
+      style,
+    });
     if (result) {
       form.resetFields();
       onClose();
@@ -30,25 +40,32 @@ function CreateProjectDrawer({ open, busy, onClose, onCreate }: {
   }
 
   return <Drawer title="创建视频项目" open={open} onClose={onClose} width="min(460px, 100vw)" destroyOnClose>
-    <Typography.Paragraph type="secondary">选择内容类型，导演会据此规划大纲与镜头。</Typography.Paragraph>
-    <Form form={form} layout="vertical" initialValues={{ projectType: "story", aspectRatio: "9:16", style: "cinematic animated short film", sceneCount: 3 }} onFinish={(values) => void submit(values)}>
+    <Typography.Paragraph type="secondary">故事原文会完整保留，再拆解为制作剧本和分镜。</Typography.Paragraph>
+    <Form form={form} layout="vertical" initialValues={{ projectType: "story", aspectRatio: "9:16", stylePreset: "cinematic_realism", sceneCount: 3 }} onFinish={(values) => void submit(values)}>
       <Form.Item name="projectType" label="项目类型" rules={[{ required: true }]}>
         <Select options={[{ value: "story", label: "普通故事" }, { value: "science", label: "科普" }]} />
       </Form.Item>
       {projectType === "science" && <Typography.Paragraph type="secondary">科普项目不生成出镜人物；使用对象、场景和过程解释知识。</Typography.Paragraph>}
-      <Form.Item name="story" label={projectType === "science" ? "科普主题与内容" : "故事梗概"} rules={[{ required: true, whitespace: true, message: projectType === "science" ? "请填写科普主题与内容" : "请填写故事梗概" }]}>
-        <Input.TextArea rows={6} maxLength={6000} showCount placeholder={projectType === "science" ? "主题、现象、原理和希望说明的结论……" : "人物、目标、冲突和结局……"} />
+      <Form.Item name="story" label={projectType === "science" ? "科普原文" : "故事原文"} rules={[
+        { required: true, whitespace: true, message: "请输入原文内容" },
+        { validator: (_, value: string | undefined) => !value || Array.from(value).length <= 6000 ? Promise.resolve() : Promise.reject(new Error("原文超过 6000 个字符，请拆分后创建项目；输入内容已保留。")) },
+      ]}>
+        <Input.TextArea rows={6} showCount={{ formatter: ({ value }) => Array.from(value || "").length }} placeholder={projectType === "science" ? "粘贴需要制作的视频原文，系统会按原文拆解……" : "粘贴完整故事或剧本，系统不会改写原文……"} />
       </Form.Item>
       <Form.Item name="aspectRatio" label="画面比例">
         <Select options={[{ value: "9:16", label: "竖屏 · 9:16" }, { value: "16:9", label: "横屏 · 16:9" }]} />
       </Form.Item>
-      <Form.Item name="style" label="视觉风格" rules={[{ required: true, whitespace: true, message: "请填写视觉风格" }]}>
-        <Input maxLength={180} placeholder="例如：电影感动画短片" />
+      <Form.Item name="stylePreset" label="视频风格" rules={[{ required: true, message: "请选择视频风格" }]}>
+        <Select options={[...VIDEO_STYLE_PRESETS.map(({ value, label }) => ({ value, label })), { value: "custom", label: "自定义" }]} />
       </Form.Item>
-      <Form.Item name="sceneCount" label="场景数" rules={[{ required: true, message: "请选择场景数" }]}>
+      <Typography.Paragraph type="secondary">风格会转换为统一的画面提示词，应用于导演规划和首尾帧生成。</Typography.Paragraph>
+      {stylePreset === "custom" && <Form.Item name="customStyle" label="自定义风格提示词" rules={[{ required: true, whitespace: true, message: "请填写自定义风格提示词" }]}>
+        <Input.TextArea maxLength={500} showCount rows={3} placeholder="描述画面质感、色彩、光线或动画形式" />
+      </Form.Item>}
+      <Form.Item name="sceneCount" label="目标镜头数" rules={[{ required: true, message: "请选择目标镜头数" }]}>
         <InputNumber min={1} max={12} precision={0} style={{ width: "100%" }} />
       </Form.Item>
-      <Button type="primary" htmlType="submit" loading={busy} block>生成导演大纲与分镜</Button>
+      <Button type="primary" htmlType="submit" loading={busy} block>拆解原文并生成分镜</Button>
     </Form>
   </Drawer>;
 }

@@ -94,7 +94,7 @@ export function AssetWorkspace({ project, busy, onCreate, onUpdate, onUpload, on
   const entityCard = (asset: ProjectAsset) => <Card className="asset-card" key={asset.id}>
     <div className="asset-card-heading"><div><Typography.Text strong>{asset.name}</Typography.Text><Tag>{asset.kind === "character" ? "角色" : "场景"}</Tag></div>
       <Typography.Text className="asset-description-label" type="secondary">视觉设定</Typography.Text>
-      <Typography.Paragraph type="secondary">{asset.description || "导演规划中的视觉参考"}</Typography.Paragraph>
+      <Typography.Paragraph type="secondary">{asset.description || "原文未明确外观，上传参考图可统一视觉表现"}</Typography.Paragraph>
     </div>
     {imagePreview(asset)}
     <div className="asset-related"><Typography.Text type="secondary">自动关联 {project.shots.filter((shot) => asset.kind === "character" ? shot.visibleCharacters.includes(asset.entityName || asset.name) : shot.locationName === (asset.entityName || asset.name)).length} 个镜头</Typography.Text>
@@ -104,7 +104,7 @@ export function AssetWorkspace({ project, busy, onCreate, onUpdate, onUpload, on
   </Card>;
 
   return <div className="asset-workspace">
-    <div className="section-heading"><div><Typography.Title level={4}>项目资产</Typography.Title><Typography.Text type="secondary">{project.projectType === "science" ? "上传自然对象、场景或实验装置等参考图，自动关联镜头。" : "上传参考图自动关联镜头。"}卡片中的文字是视觉设定；生图提示词在镜头的首尾帧面板中编辑。</Typography.Text></div>
+    <div className="section-heading"><div><Typography.Title level={4}>项目资产</Typography.Title><Typography.Text type="secondary">{project.projectType === "science" ? "角色不会从科普项目中生成；可为自然对象、场景或实验装置上传参考图。" : "角色和场景按原文拆解后自动关联镜头，可上传参考图保持画面一致。"}卡片文字仅描述原文明确的视觉设定；首尾帧提示词在分镜面板中编辑。</Typography.Text></div>
       <Button type="primary" onClick={() => { form.resetFields(); setEditing({ id: "", kind: "reference", name: "", description: "", entityName: null, scopeShotIds: [], image: null, revision: 0 }); }} disabled={!project.shots.length}>新增其他参考</Button>
     </div>
     {!project.shots.length ? <Alert type="info" showIcon message={project.projectType === "science" ? "导演完成分镜后，可在这里上传场景、自然对象、实验装置等参考图。" : "导演完成分镜后，可在这里上传角色、场景和其他参考图。"} /> : <>

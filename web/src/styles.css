@@ -24,11 +24,12 @@ a { color: #176b5b; }
 .sidebar-heading .ant-typography { margin: 0; }
 .sidebar-heading .ant-typography h5 { margin-top: 4px; }
 .eyebrow { color: #82908a !important; font-size: 10px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
-.project-list .ant-list-item { padding: 3px 0; border-block-end: 0; }
-.project-list .ant-list-item-action { margin-inline-start: 4px; }
+.project-list .ant-list-item { min-width: 0; padding: 3px 0; border-block-end: 0; }
+.project-list .ant-list-item > .project-nav-item { flex: 1 1 0; width: 0; min-width: 0; }
+.project-list .ant-list-item-action { flex: 0 0 auto; margin-inline-start: 4px; }
 .project-list .ant-list-item-action > li { padding: 0; }
 .project-nav-item.ant-btn { display: flex; height: auto; min-height: 54px; flex-direction: column; align-items: flex-start; justify-content: center; gap: 4px; padding: 9px 11px; text-align: left; }
-.project-nav-item.ant-btn > span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.project-nav-item.ant-btn > span { display: block; width: 100%; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .project-nav-title { font-size: 13px; font-weight: 600; }
 .project-nav-subtitle { opacity: .7; font-size: 11px; }
 .sidebar-empty { margin: 22px 0; }

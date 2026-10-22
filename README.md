@@ -14,7 +14,7 @@ The web app is served separately during development; Vite proxies `/v1` to the A
 
 If FFmpeg is not on `PATH`, set `FFMPEG_BIN` and `FFPROBE_BIN` in `.env` to their executable paths.
 
-The director uses a Google outline stage followed by a Google shot-planning stage. The continuous narration is sentence-based, aligned deterministically to the edit timeline, and voiced only with MiniMax Speech. Text and image generation use a service-account-bound Google Cloud API key through Agent Platform. Omni video uses the Gemini Developer API and its separate `GOOGLE_VIDEO_API_KEY` with `gemini-omni-1.1-flash`; it does not use ADC or the Cloud project key. See [the acceptance runbook](docs/acceptance-runbook.md) for joint testing.
+The director preserves the submitted story as-is, breaks it into source-linked production scenes, then plans shots against both the original text and the breakdown. It does not create a rewritten synopsis or change the project story. Each new shot shows its source excerpt. The continuous narration is sentence-based, aligned deterministically to the edit timeline, and voiced only with MiniMax Speech. Text and image generation use a service-account-bound Google Cloud API key through Agent Platform. Omni video uses the Gemini Developer API and its separate `GOOGLE_VIDEO_API_KEY` with `gemini-omni-1.1-flash`; it does not use ADC or the Cloud project key. See [the acceptance runbook](docs/acceptance-runbook.md) for joint testing.
 
 ## Local setup
 
