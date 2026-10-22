@@ -56,6 +56,7 @@ class SourceCharacterReference(BaseModel):
 
 class ProductionCharacter(BaseModel):
     name: str = Field(min_length=1, max_length=120)
+    entityType: Literal["person", "organism"] = "person"
     description: str = ""
     visualIdentity: str = ""
     sourceSegmentIds: list[str] = Field(min_length=1)
@@ -157,7 +158,7 @@ class ProductionScript(BaseModel):
                 ref_ids = set(reference.sourceSegmentIds)
                 character = characters_by_name.get(reference.characterName)
                 if character is None or not ref_ids or not ref_ids <= refs:
-                    raise ValueError("角色代词关联必须引用当前场景中的已知角色和原文片段")
+                    raise ValueError("实体代词关联必须引用当前场景中的已知实体和原文片段")
                 has_valid_antecedent = False
                 for beat_index, beat in enumerate(scene.beats):
                     beat_ids = set(beat.sourceSegmentIds)
@@ -174,9 +175,14 @@ class ProductionScript(BaseModel):
                             and source_ranges[item.id][1] > quote_start
                         ]
                         if quote_end <= beat_end and quote_ids == reference.sourceSegmentIds:
+                            pronoun_pattern = (
+                                r"(?<![其吉])它(?:们)?"
+                                if character.entityType == "organism"
+                                else r"(?<![其吉])(?:他|她|祂)(?:们)?"
+                            )
                             pronouns = [
                                 match for match in re.finditer(
-                                    r"(?<![其吉])(?:他|她|祂)(?:们)?", original
+                                    pronoun_pattern, original
                                 )
                                 if quote_start <= match.start()
                                 and match.end() <= quote_end
@@ -184,7 +190,8 @@ class ProductionScript(BaseModel):
                             for pronoun in pronouns:
                                 prior_names = {
                                     item.name for item in self.characters
-                                    if item.name in original[:pronoun.start()]
+                                    if item.entityType == character.entityType
+                                    and item.name in original[:pronoun.start()]
                                 }
                                 if prior_names == {reference.characterName}:
                                     has_valid_antecedent = True
@@ -195,7 +202,7 @@ class ProductionScript(BaseModel):
                     if has_valid_antecedent:
                         break
                 if not has_valid_antecedent:
-                    raise ValueError("角色代词关联必须只有一个可确认的前置人物")
+                    raise ValueError("实体代词关联必须只有一个可确认的前置实体")
             if scene.locationName:
                 location = locations_by_name.get(scene.locationName)
                 if location is None or not self.entity_is_present_in_scene(location, scene):
@@ -267,6 +274,7 @@ class DirectorShotPlan(BaseModel):
     index: int = Field(ge=0)
     sceneIndex: int = Field(ge=0)
     sourceBeatIndex: int = Field(ge=0)
+    sourceBeatEndIndex: int | None = Field(default=None, ge=0)
     sourceSegmentIds: list[str] = Field(min_length=1)
     title: str
     beat: str
@@ -402,6 +410,7 @@ class Shot(BaseModel):
     durationSeconds: int = Field(ge=3, le=10)
     sceneIndex: int = Field(default=0, ge=0)
     sourceBeatIndex: int | None = Field(default=None, ge=0)
+    sourceBeatEndIndex: int | None = Field(default=None, ge=0)
     sourceSegmentIds: list[str] = Field(default_factory=list)
     beat: str = ""
     narrativePurpose: str = ""
@@ -505,7 +514,10 @@ class Project(BaseModel):
         project_id = value.get("projectId", "")
         assets = []
         entity_groups = (("location", outline.get("locations", [])),)
-        if value.get("projectType", "story") != "science":
+        if value.get("projectType", "story") == "science" and source_preserving:
+            organisms = [entity for entity in outline.get("characters", []) if entity.get("entityType") == "organism"]
+            entity_groups = (("character", organisms), *entity_groups)
+        elif value.get("projectType", "story") != "science":
             entity_groups = (("character", outline.get("characters", [])), *entity_groups)
         for kind, entities in entity_groups:
             for entity in entities:

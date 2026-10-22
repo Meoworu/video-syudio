@@ -45,7 +45,7 @@ function CreateProjectDrawer({ open, busy, onClose, onCreate }: {
       <Form.Item name="projectType" label="项目类型" rules={[{ required: true }]}>
         <Select options={[{ value: "story", label: "普通故事" }, { value: "science", label: "科普" }]} />
       </Form.Item>
-      {projectType === "science" && <Typography.Paragraph type="secondary">科普项目不生成出镜人物；使用对象、场景和过程解释知识。</Typography.Paragraph>}
+      {projectType === "science" && <Typography.Paragraph type="secondary">科普项目不生成出镜人类；原文中的真实动物和昆虫可以作为生物主体呈现。</Typography.Paragraph>}
       <Form.Item name="story" label={projectType === "science" ? "科普原文" : "故事原文"} rules={[
         { required: true, whitespace: true, message: "请输入原文内容" },
         { validator: (_, value: string | undefined) => !value || Array.from(value).length <= 6000 ? Promise.resolve() : Promise.reject(new Error("原文超过 6000 个字符，请拆分后创建项目；输入内容已保留。")) },

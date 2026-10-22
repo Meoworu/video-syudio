@@ -6,6 +6,7 @@ export type Shot = {
   durationSeconds: number;
   sceneIndex: number;
   sourceBeatIndex?: number | null;
+  sourceBeatEndIndex?: number | null;
   sourceSegmentIds: string[];
   beat: string;
   narrativePurpose: string;
@@ -61,7 +62,7 @@ export type ProductionScript = {
     beats: { kind: "action" | "dialogue" | "information"; text: string; sourceSegmentIds: string[] }[];
     characterReferences: { characterName: string; quote: string; sourceSegmentIds: string[] }[];
   }[];
-  characters: { name: string; description: string; visualIdentity: string; sourceSegmentIds: string[] }[];
+  characters: { name: string; entityType?: "person" | "organism"; description: string; visualIdentity: string; sourceSegmentIds: string[] }[];
   locations: { name: string; description: string; visualIdentity: string; sourceSegmentIds: string[] }[];
   styleBible: Record<string, string>;
 };

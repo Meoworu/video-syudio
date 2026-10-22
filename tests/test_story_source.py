@@ -119,5 +119,5 @@ def test_repeated_pronoun_quote_uses_its_actual_beat_position(second_intro, name
         validate_script_coverage(script)
         assert script.entity_is_present_in_scene(script.characters[0], script.scenes[1])
     else:
-        with pytest.raises(ValueError, match="前置人物"):
+        with pytest.raises(ValueError, match="前置实体"):
             ProductionScript.model_validate(data)

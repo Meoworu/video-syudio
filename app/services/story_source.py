@@ -69,7 +69,11 @@ def validate_script_coverage(script: ProductionScript) -> None:
     expected = [segment.id for segment in script.sourceSegments]
     if collapsed != expected:
         raise ValueError("剧本场景必须按原文顺序覆盖全部原文片段")
+    locate_script_beats(script)
 
+
+def locate_script_beats(script: ProductionScript) -> dict[tuple[int, int], tuple[int, int]]:
+    """Locate each beat's actual occurrence while checking complete ordered coverage."""
     original = "".join(segment.text for segment in script.sourceSegments)
     source_ranges: dict[str, tuple[int, int]] = {}
     offset = 0
@@ -77,8 +81,9 @@ def validate_script_coverage(script: ProductionScript) -> None:
         source_ranges[segment.id] = (offset, offset + len(segment.text))
         offset += len(segment.text)
     cursor = 0
+    spans: dict[tuple[int, int], tuple[int, int]] = {}
     for scene in script.scenes:
-        for beat in scene.beats:
+        for beat_index, beat in enumerate(scene.beats):
             # Repeated wording elsewhere cannot stand in for the cited occurrence.
             start = max(cursor, source_ranges[beat.sourceSegmentIds[0]][0])
             end = source_ranges[beat.sourceSegmentIds[-1]][1]
@@ -88,8 +93,10 @@ def validate_script_coverage(script: ProductionScript) -> None:
             if original[cursor:position].strip():
                 raise ValueError("剧本行动和台词遗漏或改动了原文内容")
             cursor = position + len(beat.text)
+            spans[(scene.index, beat_index)] = (position, cursor)
     if original[cursor:].strip():
         raise ValueError("剧本行动和台词遗漏或改动了原文内容")
+    return spans
 
 
 def quote_source_ids(text: str, source_segments: Iterable[SourceSegment]) -> list[str]:

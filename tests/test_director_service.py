@@ -3,7 +3,7 @@ import pytest
 from app.config import Settings
 from app.domain.models import CreateProjectRequest, ProductionScript, Project, Shot
 from app.services.director_service import DirectorService
-from app.services.story_source import split_source
+from app.services.story_source import source_hash, split_source
 from app.store.project_store import ProjectStore
 
 
@@ -60,6 +60,72 @@ def test_director_preserves_story_and_generates_source_linked_script_and_shot():
     assert project.editPlan[-1]["timelineEnd"] == 5
     assert project.shots[0].locationName == "溪流"
     assert any(asset.kind == "location" and asset.entityName == "溪流" for asset in project.assets)
+
+
+@pytest.mark.parametrize("beat_count, shot_count, ranges", [
+    (17, 10, [(0, 0), (1, 2), (3, 4), (5, 5), (6, 7), (8, 9), (10, 10), (11, 12), (13, 14), (15, 16)]),
+    (2, 4, [(0, 0), (0, 0), (1, 1), (1, 1)]),
+])
+def test_shots_cover_action_ranges_without_rewriting_script(beat_count, shot_count, ranges):
+    story = "".join(f"动作{i}没有改变。\n" for i in range(beat_count))
+    segments = split_source(story)
+    script = ProductionScript(
+        sourceHash=source_hash(story), sourceSegments=segments,
+        scenes=[{"index": 0, "title": "原文场景", "sourceSegmentIds": [s.id for s in segments], "beats": [
+            {"text": s.text, "sourceSegmentIds": [s.id]} for s in segments
+        ]}],
+    )
+    template = FakeGoogleText(story).generate_json("分镜")["shots"][0]
+
+    class RangeClient:
+        def generate_json(self, prompt):
+            assert "镜头原文分配" in prompt
+            return {"shots": [
+                {**template, "index": i, "sourceBeatIndex": start, "sourceBeatEndIndex": end,
+                 "sourceSegmentIds": [s.id for s in segments[start:end + 1]],
+                 "beat": "".join(s.text for s in segments[start:end + 1])}
+                for i, (start, end) in enumerate(ranges)
+            ]}
+
+    service = DirectorService(Settings(_env_file=None), client=RangeClient())
+    request = CreateProjectRequest(story=story, sceneCount=shot_count)
+    plans = service._generate_shots(request, script)
+    project = service._build_project("video_ranges123", request, script, plans)
+    assert len(project.shots) == shot_count
+    assert [(s.sourceBeatIndex, s.sourceBeatEndIndex) for s in project.shots] == ranges
+    assert len(project.productionScript.scenes[0].beats) == beat_count
+    if shot_count <= beat_count:
+        assert "".join(s.beat for s in project.shots) == story
+    assert project.story == story
+
+
+@pytest.mark.parametrize("invalid_field", ["sourceBeatEndIndex", "beat"])
+def test_shot_range_cannot_skip_or_rewrite_assigned_actions(invalid_field):
+    story = "没有开门。\n继续等待。"
+    segments = split_source(story)
+    ids = [s.id for s in segments]
+    script = ProductionScript(
+        sourceHash=source_hash(story), sourceSegments=segments,
+        scenes=[{"index": 0, "title": "等待", "sourceSegmentIds": ids, "beats": [
+            {"text": s.text, "sourceSegmentIds": [s.id]} for s in segments
+        ]}],
+    )
+    raw = FakeGoogleText(story).generate_json("分镜")
+    raw["shots"][0]["sourceBeatEndIndex"] = 1
+    raw["shots"][0][invalid_field] = 0 if invalid_field == "sourceBeatEndIndex" else "开门。继续等待。"
+
+    class InvalidClient:
+        calls = 0
+
+        def generate_json(self, prompt):
+            self.calls += 1
+            return raw
+
+    client = InvalidClient()
+    service = DirectorService(Settings(_env_file=None), client=client)
+    with pytest.raises(ValueError, match="分配"):
+        service._generate_shots(CreateProjectRequest(story=story, sceneCount=1), script)
+    assert client.calls == 2
 
 
 class ScienceGoogleText(FakeGoogleText):

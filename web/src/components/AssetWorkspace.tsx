@@ -17,7 +17,7 @@ export function AssetWorkspace({ project, busy, onCreate, onUpdate, onUpload, on
   const [editing, setEditing] = useState<ProjectAsset | null>(null);
   const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
   const previewRefs = useRef(new Map<string, HTMLDivElement>());
-  const entities = project.assets.filter((asset) => asset.kind !== "reference" && !(project.projectType === "science" && asset.kind === "character"));
+  const entities = project.assets.filter((asset) => asset.kind !== "reference");
   const references = project.assets.filter((asset) => asset.kind === "reference");
 
   const upload = useCallback((asset: ProjectAsset, file: File) => {
@@ -91,8 +91,11 @@ export function AssetWorkspace({ project, busy, onCreate, onUpdate, onUpload, on
     }
   }
 
-  const entityCard = (asset: ProjectAsset) => <Card className="asset-card" key={asset.id}>
-    <div className="asset-card-heading"><div><Typography.Text strong>{asset.name}</Typography.Text><Tag>{asset.kind === "character" ? "角色" : "场景"}</Tag></div>
+  const entityCard = (asset: ProjectAsset) => {
+    const isOrganism = asset.kind === "character" && project.projectType === "science"
+      && project.productionScript?.characters.some((character) => character.name === (asset.entityName || asset.name) && character.entityType === "organism");
+    return <Card className="asset-card" key={asset.id}>
+    <div className="asset-card-heading"><div><Typography.Text strong>{asset.name}</Typography.Text><Tag>{isOrganism ? "生物主体" : asset.kind === "character" ? "角色" : "场景"}</Tag></div>
       <Typography.Text className="asset-description-label" type="secondary">视觉设定</Typography.Text>
       <Typography.Paragraph type="secondary">{asset.description || "原文未明确外观，上传参考图可统一视觉表现"}</Typography.Paragraph>
     </div>
@@ -102,9 +105,10 @@ export function AssetWorkspace({ project, busy, onCreate, onUpdate, onUpload, on
       {asset.image && <Popconfirm title="删除这张参考图？" description="相关镜头下次生成时将不再使用它。" okText="删除图片" cancelText="取消" onConfirm={() => void onDelete(asset.id)}><Button danger disabled={busy}>删除图片</Button></Popconfirm>}
     </div>
   </Card>;
+  };
 
   return <div className="asset-workspace">
-    <div className="section-heading"><div><Typography.Title level={4}>项目资产</Typography.Title><Typography.Text type="secondary">{project.projectType === "science" ? "角色不会从科普项目中生成；可为自然对象、场景或实验装置上传参考图。" : "角色和场景按原文拆解后自动关联镜头，可上传参考图保持画面一致。"}卡片文字仅描述原文明确的视觉设定；首尾帧提示词在分镜面板中编辑。</Typography.Text></div>
+    <div className="section-heading"><div><Typography.Title level={4}>项目资产</Typography.Title><Typography.Text type="secondary">{project.projectType === "science" ? "不生成人类角色；原文中的动物、昆虫等生物主体及场景会自动关联镜头，可上传参考图。" : "角色和场景按原文拆解后自动关联镜头，可上传参考图保持画面一致。"}卡片文字仅描述原文明确的视觉设定；首尾帧提示词在分镜面板中编辑。</Typography.Text></div>
       <Button type="primary" onClick={() => { form.resetFields(); setEditing({ id: "", kind: "reference", name: "", description: "", entityName: null, scopeShotIds: [], image: null, revision: 0 }); }} disabled={!project.shots.length}>新增其他参考</Button>
     </div>
     {!project.shots.length ? <Alert type="info" showIcon message={project.projectType === "science" ? "导演完成分镜后，可在这里上传场景、自然对象、实验装置等参考图。" : "导演完成分镜后，可在这里上传角色、场景和其他参考图。"} /> : <>

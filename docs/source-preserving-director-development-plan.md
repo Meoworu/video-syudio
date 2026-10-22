@@ -120,14 +120,14 @@
 - 停止生成新的 `synopsis/logline/theme`、人物动机、戏剧冲突或结局；新流程不使用 `DirectorOutline` 作为剧情中间稿。
 - 行动与台词保留原文引用。引用文本必须是所引用原文片段的精确子串；台词、数量、专有名词不得改写，未明确的说话者或场景信息留空。
 - 场景/实体必须带 `sourceSegmentIds`；模型不能创建源文之外的人物、经历或关系。原文未明确的视觉属性标记“未指定”，摄影层可采用与风格一致的中性呈现。
-- 剧本场景数服从原文。目标镜头数不足以覆盖场景/行动时明确失败，用户可调整数量或拆分项目。
+- 剧本场景数服从原文。目标镜头数少于场景数时明确失败；行动数可以多于镜头数，一个镜头允许引用同一场景内连续多条行动。
 - 场景编号连续；按场景展开出处后允许相邻重复，去除相邻重复后的片段索引必须完整且有序，避免漏段或倒序。原文跨一个片段发生换场时，可引用同一片段内的不同精确原句。
 - 第一阶段通过后持久化剧本与来源签名，再进入分镜设计；不增加强制确认点击。
 
 ### 8.4 第二阶段：分镜与技术执行
 
 - 输入同时包含完整原文、已验证制作剧本、风格、比例和目标镜头数；始终声明原文是剧情事实的最终依据。
-- 每个镜头增加 `sourceSegmentIds` 和场景内的 `sourceBeatIndex`，同时引用一个已规划场景。行动序号按顺序覆盖场景全部 beat；同一 beat 可连续用于多个景别，不能倒序或遗漏行动。
+- 每个镜头增加 `sourceSegmentIds`、场景内的 `sourceBeatIndex` 和 `sourceBeatEndIndex`，起止序号均包含。程序按目标镜头数预分配连续行动范围，模型逐字复制分配的原文和出处；范围文本直接从完整原文截取，保留中间空白。行动数多于镜头数时允许一镜多行动；镜头数多于行动数时可连续重复同一范围以展示不同景别。所有行动必须完整有序覆盖。
 - 允许补充景别、运镜、构图、光线、首尾帧、运动节拍与剪辑衔接；不得新增事件、关系、台词、知识结论或原文未给出的数字。
 - 校验镜头数、场景引用、片段覆盖与顺序、角色/地点归属、3–10 秒时长及节拍范围；所有剧本场景必须至少被一个镜头覆盖。
 - 新项目标题从原文首个非空行确定性截取到现有标题长度上限，仅用于列表显示；原文不被标题替换。
@@ -157,7 +157,7 @@
 - `Project` 新增 `directorMode: legacy_outline | source_preserving`，读取旧 JSON 默认 `legacy_outline`；新建时明确写 `source_preserving`。
 - `Project` 新增可空 `productionScript`：含 `schemaVersion/sourceHash/sourceSegments/scenes/characters/locations/styleBible` 及缓存使用的输入签名。源文片段和签名由服务端生成。
 - `ProductionScript.scenes` 含 `index/sourceSegmentIds/locationName/timeOfDay/beats`；`beats` 的行动与台词用精确原文引用表达，不增加改写梗概字段。
-- `Shot` 新增 `sourceSegmentIds: list[str] = []` 与可空的 `sourceBeatIndex`；新模式要求镜头行动序号覆盖场景全部 beat，旧镜头为空并显示“旧项目无原文出处”。
+- `Shot` 新增 `sourceSegmentIds: list[str] = []`、可空的 `sourceBeatIndex` 和 `sourceBeatEndIndex`；缺少结束序号时沿用起始序号以兼容已有单行动镜头。新模式要求按预分配范围完整覆盖场景全部 beat，旧镜头为空并显示“旧项目无原文出处”。
 - `directorOutline` 保留用于旧项目，新流程为 `null`；资产 schemaVersion 沿用当前定义，避免把它与导演模式混为一谈。
 - POST/GET/list/DELETE 路由不变。后台结构失败沿用项目 `failed/errorMessage`，没有新 HTTP 成功语义；重试保护拒绝返回 409。
 
