@@ -15,7 +15,7 @@ cd web && npm ci
 
 ## 配置服务商
 
-在 `.env` 填写 `GOOGLE_CLOUD_PROJECT`、`GOOGLE_API_KEY` 和 `MINIMAX_API_KEY`。Cloud 项目必须关联持有试用赠金的结算账号，启用 Agent Platform API，并授权 Key 绑定的服务账号。Key 保持限制为 Agent Platform API。`GEMINI_API_KEY`、`GOOGLE_CLOUD_API_KEY` 可作为 Google Key 的备用名称。Google Cloud API Key 仅由后端读取，不要放入前端配置。`GOOGLE_HTTP_TIMEOUT_SECONDS` 设置文字/视频请求的超时，默认 120 秒。
+在 `.env` 填写 `GOOGLE_CLOUD_PROJECT`、`GOOGLE_API_KEY`、`GOOGLE_VIDEO_API_KEY` 和 `MINIMAX_API_KEY`。Cloud 项目必须关联持有试用赠金的结算账号，启用 Agent Platform API，并授权 Key 绑定的服务账号。`GOOGLE_API_KEY` 保持限制为 Agent Platform API；`GEMINI_API_KEY`、`GOOGLE_CLOUD_API_KEY` 仅作为文字和图片 Cloud Key 的备用名称。视频单独使用 Gemini Developer API Key `GOOGLE_VIDEO_API_KEY`，建议将其限制为 Generative Language API，模型固定为 `gemini-omni-1.1-flash`。两类 Key 均只由后端读取，不要放入前端配置。Gemini API 视频费用独立结算，不能使用 Google Cloud 试用赠金。`GOOGLE_HTTP_TIMEOUT_SECONDS` 设置 Google 请求的超时，默认 120 秒。
 
 图片生成也使用同一 Google Cloud Agent Platform API Key 和项目，不调用 Gemini Developer API。默认模型为 `gemini-3.1-flash-image`；`GOOGLE_IMAGE_MODEL` 可更换模型，`GOOGLE_IMAGE_RESOLUTION` 设置输出尺寸（默认 `1K`），`GOOGLE_IMAGE_TIMEOUT_SECONDS` 默认 180 秒，`GOOGLE_IMAGE_MAX_CONCURRENCY` 默认限制为 2 个并发任务。图片用量是否由试用赠金抵扣，以 Cloud Billing 的服务范围和账单记录为准。
 
@@ -58,4 +58,4 @@ cd web && npm run build
 
 真实服务商调用和完整流程的验收步骤见 [联调验收清单](docs/acceptance-runbook.md)。
 
-Google 请求固定使用 Agent Platform 的 `aiplatform.googleapis.com`，区域为 `global`；无需本机 ADC 登录。赠金抵扣、余额和有效期以 Cloud Billing 为准。视频请求使用 inline 输出，保留取消和临时文件清理。旧端点任务需在原平台处理后重新提交。详见 [接入说明](docs/agent-platform-api-key-development.md)。
+文字和图片请求使用 Agent Platform 的 `aiplatform.googleapis.com`、区域 `global` 和 Cloud API Key；Omni 视频使用 Gemini Developer API Key。Cloud 赠金抵扣、余额和有效期以 Cloud Billing 为准，Gemini API 视频费用单独结算。视频任务支持 URI 与 inline 输出，保留取消和临时文件清理。旧端点任务需在原平台处理后重新提交。详见 [接入说明](docs/agent-platform-api-key-development.md) 和 [视频接入方案](docs/gemini-omni-1.1-api-key-development-plan.md)。

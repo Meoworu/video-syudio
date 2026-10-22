@@ -14,9 +14,10 @@ class Settings(BaseSettings):
     google_api_key: SecretStr | None = Field(default=None, alias="GOOGLE_API_KEY", repr=False)
     gemini_api_key: SecretStr | None = Field(default=None, alias="GEMINI_API_KEY", repr=False)
     google_cloud_api_key: SecretStr | None = Field(default=None, alias="GOOGLE_CLOUD_API_KEY", repr=False)
+    google_video_api_key: SecretStr | None = Field(default=None, alias="GOOGLE_VIDEO_API_KEY", repr=False)
     google_cloud_project: str = Field(default="", alias="GOOGLE_CLOUD_PROJECT")
     google_text_model: str = Field(default="gemini-3.6-flash", alias="GOOGLE_TEXT_MODEL")
-    google_omni_model: str = Field(default="gemini-omni-flash-preview", alias="GOOGLE_OMNI_MODEL")
+    google_omni_model: str = Field(default="gemini-omni-1.1-flash", alias="GOOGLE_OMNI_MODEL")
     google_image_model: str = Field(default="gemini-3.1-flash-image", alias="GOOGLE_IMAGE_MODEL")
     google_image_resolution: str = Field(default="1K", alias="GOOGLE_IMAGE_RESOLUTION")
     google_image_timeout_seconds: float = Field(default=180.0, gt=0, alias="GOOGLE_IMAGE_TIMEOUT_SECONDS")
@@ -40,7 +41,7 @@ class Settings(BaseSettings):
     def trim_cloud_project(cls, value: str) -> str:
         return value.strip()
 
-    @field_validator("google_api_key", "gemini_api_key", "google_cloud_api_key", mode="before")
+    @field_validator("google_api_key", "gemini_api_key", "google_cloud_api_key", "google_video_api_key", mode="before")
     @classmethod
     def blank_api_key_is_missing(cls, value: object) -> object:
         return None if value is None or (isinstance(value, str) and not value.strip()) else value
@@ -51,6 +52,10 @@ class Settings(BaseSettings):
             if key is not None and key.get_secret_value().strip():
                 return key.get_secret_value().strip()
         return None
+
+    @property
+    def google_video_api_key_value(self) -> str | None:
+        return self.google_video_api_key.get_secret_value().strip() if self.google_video_api_key else None
 
 
 @lru_cache

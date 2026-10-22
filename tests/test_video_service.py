@@ -4,7 +4,7 @@ import pytest
 
 from app.clients.google_omni_video import GoogleOmniVideoClient
 from app.config import Settings
-from app.domain.models import Project, Shot, ShotVideo
+from app.domain.models import FrameVersion, Project, Shot, ShotVideo
 from app.services.video_service import VideoService
 from app.store.project_store import ProjectStore
 
@@ -37,19 +37,23 @@ def test_video_service_persists_complete_result(tmp_path: Path) -> None:
     first = store.save_upload(project.projectId, "shot_001", "first", b"first")
     last = store.save_upload(project.projectId, "shot_001", "last", b"last")
     project = store.get(project.projectId)
-    project.shots[0].uploads.firstFrame = str(first.relative_to(store.project_dir(project.projectId)))
-    project.shots[0].uploads.lastFrame = str(last.relative_to(store.project_dir(project.projectId)))
+    first_path = str(first.relative_to(store.project_dir(project.projectId)))
+    last_path = str(last.relative_to(store.project_dir(project.projectId)))
+    project.shots[0].frames["first"].versions = [FrameVersion(id="first-v1", path=first_path)]
+    project.shots[0].frames["first"].selectedVersionId = "first-v1"
+    project.shots[0].frames["last"].versions = [FrameVersion(id="last-v1", path=last_path)]
+    project.shots[0].frames["last"].selectedVersionId = "last-v1"
     store.save(project)
-    service = VideoService(Settings(_env_file=None), store, client=FakeVideoClient())
+    service = VideoService(Settings(_env_file=None, GOOGLE_VIDEO_API_KEY="video-key"), store, client=FakeVideoClient())
     service.run(project.projectId, "shot_001")
     result = store.get(project.projectId).shots[0].video
     assert result is not None
-    assert result.status == "complete"
-    assert result.provider == "google_agent_platform"
+    assert result.status == "complete", result.errorMessage
+    assert result.provider == "google_gemini_omni_1_1"
     assert (store.project_dir(project.projectId) / result.path).read_bytes() == b"video"
 
 
-@pytest.mark.parametrize("provider", ["google_vertex", "google_gemini"])
+@pytest.mark.parametrize("provider", ["google_vertex", "google_gemini", "google_agent_platform"])
 def test_video_service_does_not_send_legacy_job_to_agent_platform(tmp_path: Path, provider: str) -> None:
     store = ProjectStore(tmp_path)
     project = Project(
@@ -76,7 +80,7 @@ def test_video_service_does_not_send_legacy_job_to_agent_platform(tmp_path: Path
     assert "旧服务端点" in (result.errorMessage or "")
 
 
-@pytest.mark.parametrize("provider", ["google_vertex", "google_gemini"])
+@pytest.mark.parametrize("provider", ["google_vertex", "google_gemini", "google_agent_platform"])
 def test_video_service_does_not_cancel_legacy_job_with_agent_platform(tmp_path: Path, provider: str) -> None:
     store = ProjectStore(tmp_path)
     project = Project(

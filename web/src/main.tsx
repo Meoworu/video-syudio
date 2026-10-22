@@ -64,7 +64,7 @@ function Studio() {
     <Sider className="studio-sider" width={276} theme="light" breakpoint="lg" collapsedWidth={0}>
       <div className="brand-lockup"><span className="brand-mark">VS</span><div><Typography.Text strong>video-studio</Typography.Text><Typography.Text className="brand-subtitle">AI 视频制作工作台</Typography.Text></div></div>
       <div className="sider-navigation">{navigation}</div>
-      <div className="sider-footer"><Typography.Text type="secondary">Google Agent Platform · MiniMax Speech</Typography.Text></div>
+      <div className="sider-footer"><Typography.Text type="secondary">Google AI · MiniMax Speech</Typography.Text></div>
     </Sider>
     <Layout className="studio-main-layout">
       <Header className="studio-header">
@@ -84,7 +84,7 @@ function Studio() {
           <div className="content-intro"><div><Typography.Text className="eyebrow">VIDEO PRODUCTION</Typography.Text><Typography.Title level={3}>{project.title}</Typography.Title></div><Typography.Text type="secondary">从导演大纲到最终成片，在一个工作区完成。</Typography.Text></div>
           <Tabs key={project.projectId} className="workspace-tabs" items={tabItems} />
         </> : <div className="welcome-panel">
-          <div className="welcome-copy"><Typography.Text className="eyebrow">AI VIDEO STUDIO</Typography.Text><Typography.Title>把故事，变成一部短片。</Typography.Title><Typography.Paragraph type="secondary">用 Google Agent Platform 设计分镜和生成画面，再用连续旁白与时间线完成剪辑。</Typography.Paragraph><Typography.Text type="secondary">从左侧新建项目，或选择一个已有项目继续制作。</Typography.Text></div>
+          <div className="welcome-copy"><Typography.Text className="eyebrow">AI VIDEO STUDIO</Typography.Text><Typography.Title>把故事，变成一部短片。</Typography.Title><Typography.Paragraph type="secondary">用 Google AI 设计分镜、生成首尾帧和视频，再用连续旁白与时间线完成剪辑。</Typography.Paragraph><Typography.Text type="secondary">从左侧新建项目，或选择一个已有项目继续制作。</Typography.Text></div>
           <div className="welcome-steps"><div><span>01</span><Typography.Text strong>导演规划</Typography.Text><Typography.Text type="secondary">大纲 · 场景 · 镜头</Typography.Text></div><div><span>02</span><Typography.Text strong>画面与旁白</Typography.Text><Typography.Text type="secondary">生成素材 · 对齐时间</Typography.Text></div><div><span>03</span><Typography.Text strong>合成成片</Typography.Text><Typography.Text type="secondary">镜头 · 音轨 · 导出</Typography.Text></div></div>
           {!workspace.projects.length && <Empty className="welcome-empty" image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有项目，请从项目栏创建一个新项目。" />}
         </div>}

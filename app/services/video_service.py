@@ -22,8 +22,15 @@ class VideoService:
         self.store = store
         self.client = client or GoogleOmniVideoClient(settings)
 
+    def validate_configuration(self) -> None:
+        if not self.settings.google_video_api_key_value:
+            raise ValueError("未配置 GOOGLE_VIDEO_API_KEY，请设置可访问 Gemini API 的视频专用 API Key")
+        if self.settings.google_omni_model != "gemini-omni-1.1-flash":
+            raise ValueError("当前视频模型只支持 gemini-omni-1.1-flash，请更新 GOOGLE_OMNI_MODEL")
+
     def mark_submitting(self, project: Project, shot: Shot) -> None:
-        shot.video = ShotVideo(model=self.settings.google_omni_model, status="submitting")
+        self.validate_configuration()
+        shot.video = ShotVideo(provider="google_gemini_omni_1_1", model=self.settings.google_omni_model, status="submitting")
         self.store.save(project)
 
     def run_batch(self, project_id: str, shot_ids: list[str]) -> None:
@@ -58,11 +65,12 @@ class VideoService:
                     return
                 if shot.video and shot.video.status == "complete":
                     return
-                if shot.video and shot.video.provider != "google_agent_platform":
-                    raise ValueError("此任务属于旧服务端点，无法用当前 Agent Platform API Key 恢复；请确认旧任务后重新提交")
+                if shot.video and shot.video.provider != "google_gemini_omni_1_1":
+                    raise ValueError("此任务属于旧服务端点，不能用 Gemini Omni 1.1 恢复；请在原平台处理后重新提交")
                 job_id = shot.video.remoteJobId if shot.video else None
                 if not job_id:
-                    shot.video = ShotVideo(model=self.settings.google_omni_model, status="submitting")
+                    self.validate_configuration()
+                    shot.video = ShotVideo(provider="google_gemini_omni_1_1", model=self.settings.google_omni_model, status="submitting")
                     project.finalVideoPath = None
                     self.store.save(project)
                 first = self._path(project_id, shot.uploads.firstFrame)
@@ -136,7 +144,7 @@ class VideoService:
                     shot = next(item for item in project.shots if item.id == shot_id)
                     if shot.video and shot.video.status == "cancelled":
                         return
-                    shot.video = shot.video or ShotVideo(model=self.settings.google_omni_model)
+                    shot.video = shot.video or ShotVideo(provider="google_gemini_omni_1_1", model=self.settings.google_omni_model)
                     shot.video.status = "failed"
                     shot.video.errorMessage = str(error)
                     self.store.save(project)
@@ -174,8 +182,8 @@ class VideoService:
                 raise ValueError("镜头没有正在运行的视频任务")
             if shot.video.status not in {"submitting", "generating", "downloading"}:
                 raise ValueError("镜头视频任务当前不可取消")
-            if shot.video.provider != "google_agent_platform":
-                raise ValueError("此任务属于旧服务端点，无法用当前 Agent Platform API Key 取消；请在原服务平台处理后重新提交")
+            if shot.video.provider != "google_gemini_omni_1_1":
+                raise ValueError("此任务属于旧服务端点，不能用 Gemini Omni 1.1 取消；请在原服务平台处理后重新提交")
             remote_job_id = shot.video.remoteJobId
             if not remote_job_id:
                 shot.video.status = "cancelled"

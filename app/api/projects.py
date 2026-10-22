@@ -248,7 +248,10 @@ def generate_video(
             return project
         if any(shot.frames[role].job and shot.frames[role].job.status in {"queued", "generating"} for role in ("first", "last")):
             raise HTTPException(status_code=409, detail="首尾帧生成期间不能提交视频任务")
-        VideoService(settings, store).mark_submitting(project, shot)
+        try:
+            VideoService(settings, store).mark_submitting(project, shot)
+        except ValueError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
         background_tasks.add_task(VideoService(settings, store).run, project_id, shot_id)
         return store.get(project_id)
 
@@ -302,6 +305,11 @@ def generate_all_videos(
     settings: Settings = Depends(get_settings),
     store: ProjectStore = Depends(get_store),
 ) -> Project:
+    video_service = VideoService(settings, store)
+    try:
+        video_service.validate_configuration()
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
     with store.lock(project_id):
         project = get_project(project_id, store)
         pending = []
@@ -312,13 +320,13 @@ def generate_all_videos(
                 continue
             if any(shot.frames[role].job and shot.frames[role].job.status in {"queued", "generating"} for role in ("first", "last")):
                 continue
-            shot.video = ShotVideo(model=settings.google_omni_model, status="submitting")
+            shot.video = ShotVideo(provider="google_gemini_omni_1_1", model=settings.google_omni_model, status="submitting")
             pending.append(shot.id)
         if not pending:
             raise HTTPException(status_code=409, detail="没有可提交的视频镜头；请检查首尾帧和任务状态")
         project.finalVideoPath = None
         store.save(project)
-        background_tasks.add_task(VideoService(settings, store).run_batch, project_id, pending)
+        background_tasks.add_task(video_service.run_batch, project_id, pending)
         return project
 
 

@@ -1,42 +1,30 @@
-# Agent Platform API Key 接入修正
+# Google API 接入说明
 
-日期：2026-10-20。目标：Google Cloud 试用赠金所在项目的 Agent Platform 调用；替代此前 Gemini Developer API 迁移方案。
+## 服务与凭据
 
-## 认证与结算
+- 导演文字与首尾帧图片：Google Cloud Agent Platform，使用绑定服务账号的 Cloud API Key。
+- 视频生成：Gemini Developer API Interactions，使用独立 `GOOGLE_VIDEO_API_KEY`，模型为 `gemini-omni-1.1-flash`。
+- 文字/图片 Key 配置为 `GOOGLE_API_KEY`，兼容 `GEMINI_API_KEY` 与 `GOOGLE_CLOUD_API_KEY` 别名。视频 Key 不接受这些别名，也不会回退到 Cloud Key 或 ADC。
+- Cloud 请求需要 `GOOGLE_CLOUD_PROJECT`、global 区域及 Agent Platform API 权限；Gemini 视频请求不读取 Cloud 项目或 ADC。
+- Gemini 视频 Key 建议限制为 Generative Language API。视频请求仅在服务端发出，不能返回到前端、项目 JSON 或日志。
+- Cloud 项目赠金只适用于符合 Cloud Billing 条件的 Cloud 使用量；Gemini Developer API 使用单独结算，不抵扣 Cloud 试用赠金。
 
-- 使用绑定服务账号的 Cloud API Key，保留 Agent Platform API 限制，不要求本机 gcloud ADC。
-- `GOOGLE_CLOUD_PROJECT` 必填，指向关联试用结算账号的项目 ID；不能将展示名称或旧项目名称直接当作 ID。
-- `GOOGLE_API_KEY` 为主配置，兼容 `GEMINI_API_KEY`、`GOOGLE_CLOUD_API_KEY`，优先级不变。别名不决定请求服务。
-- SDK 显式传入 `enterprise=True`、`project`、`location="global"` 和 `api_key`。项目及区域路径明确，不依赖 Express 免费档。
-- 单次请求超时默认 120 秒；Key 脱敏、空白处理及无 ADC 回退保持有效。
-- Key 绑定服务账号须具备目标项目的模型调用权限。Cloud 项目须启用 `aiplatform.googleapis.com` 并关联有效的结算账号。
-- 代码不能保证赠金可用或抵扣成功。余额、到期时间与 SKU 适用范围以 Cloud Billing 为准；不自动升级结算或修改 IAM。
+## 视频请求和任务兼容
 
-## 请求与输出
+- Interactions 使用模型 `gemini-omni-1.1-flash`、首尾帧图片输入和 `<FIRST_FRAME>` / `<LAST_FRAME>` 来源标记；时长通过提示词和视频输出格式传入，画幅通过 `response_format` 指定。
+- 提交、查询与取消统一使用 Gemini API Key。提交关闭 SDK 自动重试，避免不确定结果时重复创建收费任务；已有 Interaction ID 会持久保存并用于轮询和重启恢复。
+- 输出优先使用 Gemini Files URI，兼容 inline Base64。只接受 Gemini 官方文件资源，等待文件状态为 `ACTIVE` 后用同一视频 Key 下载，并通过 ffprobe 校验后原子替换成片。
+- 新任务 provider 为 `google_gemini_omni_1_1`。旧 `google_vertex`、`google_gemini`、`google_agent_platform` 和缺少 provider 的记录仍可读取，但远端任务不能跨 API 恢复或取消；须在原服务端处理后重新提交。
+- 401/403 不会循环重试；提交没有返回 ID 时标记提交失败，不自动重投。Key 配置正确并不代表模型权限、地域、配额或结算已经可用。
 
-- 文本：`aiplatform.googleapis.com/v1beta1/projects/{project}/locations/global/publishers/google/models/{model}:generateContent`。
-- 视频：同一项目下的 Interactions 提交、查询与取消，保留首尾帧输入及后台任务流程。
-- 视频 `response_format` 使用列表，明确 `delivery="inline"`、画幅、秒数字符串时长。SDK 契约和官方 Cloud 示例均支持这些字段。
-- 不配置 GCS 输出目标，按官方接口默认返回视频字节。内联 Base64 分块落盘，每块检查取消；校验与原子替换前后的状态检查保留。
-- 不使用 Gemini Developer Files API；若服务仍返回 URI，明确报错并清理临时文件，避免将 Cloud Key 发往错误服务。
-- 模型 ID 保持可配置。Omni 为预览能力，首尾帧任务、账号权限及真实返回形状需要目标项目联调，不以离线测试宣称已可用。
+## 验证与操作
 
-## 历史任务与健康检查
+- 查看 `/v1/health` 和 `/v1/ready` 的 Cloud Key、Cloud 项目、视频 Key、视频模型及本地媒体工具状态。健康检查不发外部请求。
+- 使用 `.env.example` 配置两种 Google Key。更换模型时不得把 Cloud 项目的 API Key 用作 Gemini 视频 Key。
+- 自动化检查不创建收费视频。真实联调通过工作台选择一个首尾帧完整的镜头后手动提交，并检查生成文件及 Gemini API 单独账单。
 
-- 新任务 provider 为 `google_agent_platform`。
-- `google_vertex`、`google_gemini` 仍可读取及播放本地素材；恢复和取消不得跨客户端复用其远端 ID。用户重提时创建新 provider 和任务 ID。
-- `/v1/health` 增加 `googleProjectConfigured`；`/v1/ready` 增加 `googleProject` 检查。就绪仅代表配置齐备，不检查云权限和赠金。
+## 官方文档
 
-## 验证
-
-- 真实 SDK 配合离线 HTTP 拦截：文本、视频提交/查询/取消均请求 Cloud 主机和指定项目路径，通过 Header 发送 Key，不触发 ADC。
-- 覆盖缺 Key、缺项目、空白、别名、旧任务隔离、inline 参数、取消清理和 URI 拒绝。
-- 执行 Python 测试、服务商边界检查和前端构建。
-- 尚未调用真实 Google 服务，未消耗赠金；最终需检查目标项目的实际账单记录。
-
-## 官方依据
-
-- [Cloud API Key 与服务账号绑定](https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/start/api-keys?usertype=standard)
-- [Cloud Interactions 与项目路径](https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/capabilities/interactions/developer-guide)
-- [Omni 视频格式及不指定 GCS 时返回视频数据](https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/video/generate-videos-from-text)
-- [Cloud 试用赠金及 AI Studio 排除项](https://docs.cloud.google.com/free/docs/free-cloud-features)
+- [Gemini Omni 视频生成和编辑](https://ai.google.dev/gemini-api/docs/omni)
+- [Gemini API Key](https://ai.google.dev/gemini-api/docs/api-key)
+- [Google Cloud 免费试用赠金适用范围](https://docs.cloud.google.com/free/docs/free-cloud-features)

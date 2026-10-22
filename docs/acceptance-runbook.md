@@ -1,6 +1,6 @@
 # video-studio 联调验收清单
 
-Google Cloud Agent Platform API Key 接入已实现；按当前环境完成自动化测试和前端构建后，再进行真实 Google / MiniMax 联测。
+文字与图片通过 Google Cloud Agent Platform API Key；视频通过 Gemini Developer API Key。按当前环境完成自动化检查后，再进行真实 Google / MiniMax 联测。
 
 范围说明：已提供 `DELETE /v1/projects/{project_id}`，会永久删除目标项目目录及其上传/生成素材；运行中的导演或视频任务会被拒绝删除，项目 ID 或目录边界异常也会拒绝操作。此操作不可恢复，请在联测中只对专门创建的测试项目验证。
 
@@ -8,10 +8,10 @@ Google Cloud Agent Platform API Key 接入已实现；按当前环境完成自�
 
 1. 安装 Python 3.12+、Node.js、FFmpeg 和 ffprobe。
 2. 在项目根目录执行 `python -m venv .venv && . .venv/bin/activate && pip install -e ".[dev]"`。
-3. 复制 `.env.example` 为 `.env`，填写 `GOOGLE_CLOUD_PROJECT`、`GOOGLE_API_KEY` 与 `MINIMAX_API_KEY`。也可用 `GEMINI_API_KEY` 或 `GOOGLE_CLOUD_API_KEY` 作为 Google Key 名称。单次请求超时默认 120 秒，可用 `GOOGLE_HTTP_TIMEOUT_SECONDS` 调整。
-4. 确认 Cloud 项目已关联持有试用赠金的结算账号，启用 Agent Platform API；Key 已绑定服务账号，且该账号有权调用配置的模型。请求走 aiplatform.googleapis.com 的项目路径，不依赖本机 ADC。检查赠金余额、到期时间及适用服务，不将 API Key 存在等同于抵扣成功。
+3. 复制 `.env.example` 为 `.env`，填写 `GOOGLE_CLOUD_PROJECT`、`GOOGLE_API_KEY`、`GOOGLE_VIDEO_API_KEY` 与 `MINIMAX_API_KEY`。`GEMINI_API_KEY` 或 `GOOGLE_CLOUD_API_KEY` 仅可作为文字/图片 Cloud Key 别名。模型设为 `GOOGLE_OMNI_MODEL=gemini-omni-1.1-flash`。单次请求超时默认 120 秒，可用 `GOOGLE_HTTP_TIMEOUT_SECONDS` 调整。
+4. 确认 Cloud 项目已关联持有试用赠金的结算账号，启用 Agent Platform API；Cloud Key 绑定的服务账号有权调用文字和图片模型。视频 Key 来自可访问 Gemini API 的项目，并允许 Generative Language API。Gemini API 视频费用独立结算，不使用 Cloud 试用赠金；检查两侧各自的结算和配额。
 5. 后端执行 `uvicorn app.main:app --host 127.0.0.1 --port 8010`；前端在 `web/` 执行 `npm install && npm run dev`。
-6. 查看 `http://127.0.0.1:8010/v1/ready`，检查 Google 项目、API Key、MiniMax Key、FFmpeg 和 ffprobe 项。
+6. 查看 `http://127.0.0.1:8010/v1/ready`，检查 Cloud 项目及 Key、视频 Key 与模型、MiniMax Key、FFmpeg 和 ffprobe 项。
 
 ## 完整流程
 
@@ -24,7 +24,7 @@ Google Cloud Agent Platform API Key 接入已实现；按当前环境完成自�
 7. 生成连续旁白；检查完整句子、全片时长预算、跨镜头 cue 时间线；手动修改后保存并确认重新对齐。
 8. 使用 MiniMax 生成至少两个不同语速版本，播放、切换 take，并确认所选版本与音频时长状态一致。
 9. 选择硬切/叠化方案后合成成片；确认音轨完整、播放正常、时长与时间线相符，旧成片只在新成片校验成功后替换。
-10. 在新的 Agent Platform 视频任务期间重启 API，确认持久 Interaction ID 能恢复；旧 Vertex ADC / Gemini Developer 任务不会发送到新端点，应先在原平台结束旧活动任务。确认视频提交使用 delivery=inline、返回视频数据通过 ffprobe，取消时无残缺成品。
+10. 在新的 Gemini Omni 视频任务期间重启 API，确认持久 Interaction ID 能恢复；旧 Vertex ADC / Agent Platform / Gemini Developer 任务不会发送到新端点，应先在原平台结束旧活动任务。确认 URI/inline 输出均可保存并通过 ffprobe，取消时无残缺成品。
 
 ## 自动检查
 
