@@ -11,6 +11,7 @@ from app.config import Settings
 from app.domain.models import NarrationSentence, NarrationTake, Project
 from app.services.narration_timing import align_narration, split_manuscript
 from app.services.editing import project_duration
+from app.services.project_type_policy import is_science
 from app.store.project_store import ProjectStore
 
 
@@ -30,8 +31,13 @@ class NarrationService:
         outline = project.directorOutline.model_dump(mode="json") if project.directorOutline else {}
         video_duration = project_duration(project)
         target = video_duration * 0.84
+        narration_role = (
+            "你是科普旁白编剧。用准确、清楚的中文连续解释知识，不要创造出镜人物或拟人向导；只讲述用户输入、大纲和分镜支持的信息，不添加未提供的实验结论、数值或事实。"
+            if is_science(project.projectType)
+            else "你是电影旁白编剧。"
+        )
         prompt = (
-            "你是电影旁白编剧。创作中文连续全片旁白，不要逐镜头解说，不要每句重复画面已明确表达的动作。"
+            narration_role + "创作中文连续全片旁白，不要逐镜头解说，不要每句重复画面已明确表达的动作。"
             "句子按完整叙事顺序连续推进，允许一句跨越多个镜头，不允许为了镜头切换制造停顿。"
             "不得新增输入故事之外的人物、事实或因果；句子需完整并以。！？结束。"
             f"旁白自然朗读目标约 {target:.1f} 秒，视频全长 {video_duration:.1f} 秒。"

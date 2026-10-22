@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 import pytest
 
 from app.api.projects import get_store
-from app.domain.models import Project, Shot, ShotVideo
+from app.domain.models import FrameJob, Project, Shot, ShotVideo
 from app.main import app
 from app.store.project_store import ProjectStore
 
@@ -102,6 +102,24 @@ def test_delete_project_refuses_active_video_job(tmp_path: Path) -> None:
             video=ShotVideo(model="test-model", status="downloading"),
         )],
     )
+    store.create(project)
+    app.dependency_overrides[get_store] = lambda: store
+    try:
+        response = TestClient(app).delete(f"/v1/projects/{project.projectId}")
+    finally:
+        app.dependency_overrides.pop(get_store, None)
+
+    assert response.status_code == 409
+    assert store.project_dir(project.projectId).is_dir()
+
+
+def test_delete_project_refuses_active_frame_job(tmp_path: Path) -> None:
+    store = ProjectStore(tmp_path)
+    project = Project(
+        projectId="video_framejob123", title="首尾帧处理中", story="故事", aspectRatio="9:16", style="style",
+        shots=[Shot(id="shot_001", index=0, title="镜头", prompt="画面", durationSeconds=5)],
+    )
+    project.shots[0].frames["first"].job = FrameJob(id="frame-job", requestId="frame-request", status="generating")
     store.create(project)
     app.dependency_overrides[get_store] = lambda: store
     try:

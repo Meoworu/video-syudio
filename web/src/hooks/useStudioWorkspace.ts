@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  assembleProject, cancelVideo, createAsset, createProject, deleteAsset, deleteFailedFrameJob, deleteFailedVideo, generateAllVideos,
+  assembleProject, cancelVideo, createAsset, createProject, deleteAsset, deleteFailedFrameJob, deleteFailedVideo, deleteProject, generateAllVideos,
   generateFrame, generateFrames, generateManuscript, generateNarrationAudio, generateVideo, getProject, listProjects, listVideoJobs,
-  retryDirector, selectFrameVersion, selectNarrationTake, updateAsset, updateFrameConfig, updateNarrationManuscript, updateShot, uploadAssetImage, uploadFrame,
+  ApiError, retryDirector, selectFrameVersion, selectNarrationTake, updateAsset, updateFrameConfig, updateNarrationManuscript, updateShot, uploadAssetImage, uploadFrame,
 } from "../api";
 import type { Project, Shot } from "../types";
 
-export type CreateProjectInput = { story: string; aspectRatio: "9:16" | "16:9"; style: string; sceneCount: number };
+export type CreateProjectInput = { story: string; projectType: "story" | "science"; aspectRatio: "9:16" | "16:9"; style: string; sceneCount: number };
 
 export function useStudioWorkspace() {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -29,14 +29,31 @@ export function useStudioWorkspace() {
     const selectionVersion = selectionVersionRef.current;
     const dataVersion = dataVersionRef.current;
     try {
-      const [nextProjects, nextJobs, nextProject] = await Promise.all([
+      const [projectsResult, jobsResult, projectResult] = await Promise.allSettled([
         listProjects(), listVideoJobs(), projectId ? getProject(projectId) : Promise.resolve(null),
       ]);
-      if (dataVersion === dataVersionRef.current) {
-        setProjects(nextProjects);
-        setVideoJobs(nextJobs);
-        if (selectionVersion === selectionVersionRef.current && projectId === selectedIdRef.current) setSelected(nextProject);
+      if (dataVersion !== dataVersionRef.current) return;
+
+      if (projectsResult.status === "fulfilled") setProjects(projectsResult.value);
+      if (jobsResult.status === "fulfilled") setVideoJobs(jobsResult.value);
+
+      if (selectionVersion === selectionVersionRef.current && projectId === selectedIdRef.current) {
+        if (projectResult.status === "fulfilled") {
+          setSelected(projectResult.value);
+        } else if (projectResult.reason instanceof ApiError && projectResult.reason.status === 404) {
+          selectionVersionRef.current += 1;
+          selectedIdRef.current = undefined;
+          setSelectedId(undefined);
+          setSelected(null);
+          setLoadingProject(false);
+          setError("");
+        } else {
+          setError(projectResult.reason instanceof Error ? projectResult.reason.message : String(projectResult.reason));
+        }
       }
+
+      const listError = projectsResult.status === "rejected" ? projectsResult.reason : jobsResult.status === "rejected" ? jobsResult.reason : null;
+      if (listError) setError(listError instanceof Error ? listError.message : String(listError));
     } catch (cause) {
       if (selectionVersion === selectionVersionRef.current && dataVersion === dataVersionRef.current) {
         setError(cause instanceof Error ? cause.message : String(cause));
@@ -105,6 +122,86 @@ export function useStudioWorkspace() {
   }, [refresh]);
 
   const create = useCallback((payload: CreateProjectInput) => run(() => createProject(payload), true), [run]);
+  const removeProject = useCallback(async (projectId: string) => {
+    if (pendingActionsRef.current) return false;
+    // Invalidate reads that started before the deletion request. If deletion fails,
+    // reload the current selection below so an ignored read cannot leave it stale.
+    dataVersionRef.current += 1;
+    pendingActionsRef.current += 1;
+    setBusy(true);
+    setError("");
+    try {
+      await deleteProject(projectId);
+    } catch (cause) {
+      if (!(cause instanceof ApiError) || cause.status !== 404) {
+        const currentProjectId = selectedIdRef.current;
+        const selectionVersion = selectionVersionRef.current;
+        const dataVersion = dataVersionRef.current;
+        if (currentProjectId) {
+          try {
+            const currentProject = await getProject(currentProjectId);
+            if (selectionVersion === selectionVersionRef.current && dataVersion === dataVersionRef.current && currentProjectId === selectedIdRef.current) {
+              setSelected(currentProject);
+              setLoadingProject(false);
+            }
+          } catch (reloadCause) {
+            if (reloadCause instanceof ApiError && reloadCause.status === 404
+              && selectionVersion === selectionVersionRef.current
+              && dataVersion === dataVersionRef.current
+              && currentProjectId === selectedIdRef.current) {
+              selectionVersionRef.current += 1;
+              selectedIdRef.current = undefined;
+              setSelectedId(undefined);
+              setSelected(null);
+              setLoadingProject(false);
+              setProjects((items) => items.filter((item) => item.projectId !== currentProjectId));
+              setVideoJobs((items) => items.filter((item) => item.projectId !== currentProjectId));
+            }
+          }
+        }
+        setError(cause instanceof Error ? cause.message : String(cause));
+        return false;
+      }
+    } finally {
+      pendingActionsRef.current -= 1;
+      setBusy(pendingActionsRef.current > 0);
+    }
+    dataVersionRef.current += 1;
+    setProjects((items) => items.filter((item) => item.projectId !== projectId));
+    setVideoJobs((items) => items.filter((item) => item.projectId !== projectId));
+    if (selectedIdRef.current === projectId) {
+      selectionVersionRef.current += 1;
+      selectedIdRef.current = undefined;
+      setSelectedId(undefined);
+      setSelected(null);
+      setLoadingProject(false);
+    } else if (selectedIdRef.current) {
+      const currentProjectId = selectedIdRef.current;
+      const selectionVersion = selectionVersionRef.current;
+      const dataVersion = dataVersionRef.current;
+      void getProject(currentProjectId).then((project) => {
+        if (selectionVersion === selectionVersionRef.current && dataVersion === dataVersionRef.current && currentProjectId === selectedIdRef.current) {
+          setSelected(project);
+        }
+      }).catch((cause) => {
+        if (selectionVersion === selectionVersionRef.current && dataVersion === dataVersionRef.current) {
+          if (cause instanceof ApiError && cause.status === 404 && currentProjectId === selectedIdRef.current) {
+            selectionVersionRef.current += 1;
+            selectedIdRef.current = undefined;
+            setSelectedId(undefined);
+            setSelected(null);
+            setLoadingProject(false);
+            setProjects((items) => items.filter((item) => item.projectId !== currentProjectId));
+            setVideoJobs((items) => items.filter((item) => item.projectId !== currentProjectId));
+            setError("");
+          } else {
+            setError(cause instanceof Error ? cause.message : String(cause));
+          }
+        }
+      });
+    }
+    return true;
+  }, []);
   const actions = {
     retryDirector: (projectId: string) => run(() => retryDirector(projectId)),
     generateManuscript: (projectId: string) => run(() => generateManuscript(projectId)),
@@ -132,5 +229,5 @@ export function useStudioWorkspace() {
     assembleProject: (projectId: string) => run(() => assembleProject(projectId)),
   };
 
-  return { projects, selected, selectedId, videoJobs, busy, error, setError, loadingProjects, loadingProject, refresh, selectProject, create, run, actions };
+  return { projects, selected, selectedId, videoJobs, busy, error, setError, loadingProjects, loadingProject, refresh, selectProject, create, removeProject, run, actions };
 }

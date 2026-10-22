@@ -53,6 +53,7 @@ export type Project = {
   projectId: string;
   title: string;
   story: string;
+  projectType: "story" | "science";
   aspectRatio: "9:16" | "16:9";
   style: string;
   schemaVersion: number;

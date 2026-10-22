@@ -8,6 +8,7 @@ from typing import Any
 from app.clients.google_omni_video import GoogleOmniVideoCancelled, GoogleOmniVideoClient
 from app.config import Settings
 from app.domain.models import Project, Shot, ShotVideo
+from app.services.project_type_policy import visual_constraint
 from app.store.project_store import ProjectStore
 
 
@@ -76,6 +77,7 @@ class VideoService:
                 first = self._path(project_id, shot.uploads.firstFrame)
                 last = self._path(project_id, shot.uploads.lastFrame)
                 aspect_ratio, prompt, duration = project.aspectRatio, shot.prompt, shot.durationSeconds
+                prompt = f"{prompt}\n{visual_constraint(project.projectType)}".strip()
             if not job_id:
                 job_id = self.client.create_interaction(
                     prompt=prompt, first_frame=first, last_frame=last,

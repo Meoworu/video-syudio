@@ -31,6 +31,9 @@ class DirectorScene(BaseModel):
     timeOfDay: str = ""
 
 
+ProjectType = Literal["story", "science"]
+
+
 class DirectorOutline(BaseModel):
     title: str = Field(min_length=1, max_length=42)
     logline: str
@@ -267,6 +270,7 @@ class Project(BaseModel):
     projectId: str
     title: str
     story: str
+    projectType: ProjectType = "story"
     aspectRatio: Literal["9:16", "16:9"]
     style: str
     schemaVersion: int = 2
@@ -294,7 +298,10 @@ class Project(BaseModel):
             outline = outline.model_dump(mode="python")
         project_id = value.get("projectId", "")
         assets = []
-        for kind, entities in (("character", outline.get("characters", [])), ("location", outline.get("locations", []))):
+        entity_groups = (("location", outline.get("locations", [])),)
+        if value.get("projectType", "story") != "science":
+            entity_groups = (("character", outline.get("characters", [])), *entity_groups)
+        for kind, entities in entity_groups:
             for entity in entities:
                 name = entity.get("name", "").strip()
                 normalized = unicodedata.normalize("NFKC", name).casefold()
@@ -311,6 +318,7 @@ class Project(BaseModel):
 
 class CreateProjectRequest(BaseModel):
     story: str = Field(min_length=1)
+    projectType: ProjectType = "story"
     aspectRatio: Literal["9:16", "16:9"] = "9:16"
     style: str = "cinematic animated short film"
     sceneCount: int = Field(default=3, ge=1, le=12)

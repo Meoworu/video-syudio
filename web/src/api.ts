@@ -1,6 +1,14 @@
 import type { Project } from "./types";
 
 const base = "/v1";
+
+export class ApiError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
 export function fileUrl(projectId: string, path: string) {
   return `${base}/projects/${encodeURIComponent(projectId)}/files/${path.split("/").map(encodeURIComponent).join("/")}`;
 }
@@ -17,7 +25,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     } catch {
       // Keep plain-text error responses as-is.
     }
-    throw new Error(message || `请求失败（${response.status}）`);
+    throw new ApiError(message || `请求失败（${response.status}）`, response.status);
   }
   return response.json() as Promise<T>;
 }
@@ -26,7 +34,11 @@ export function listProjects() {
   return request<Project[]>("/projects");
 }
 
-export function createProject(payload: { story: string; aspectRatio: string; style: string; sceneCount: number }) {
+export function deleteProject(projectId: string) {
+  return request<{ projectId: string; deleted: boolean }>(`/projects/${encodeURIComponent(projectId)}`, { method: "DELETE" });
+}
+
+export function createProject(payload: { story: string; projectType: "story" | "science"; aspectRatio: string; style: string; sceneCount: number }) {
   return request<Project>("/projects", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
 }
 

@@ -17,7 +17,7 @@ export function AssetWorkspace({ project, busy, onCreate, onUpdate, onUpload, on
   const [editing, setEditing] = useState<ProjectAsset | null>(null);
   const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
   const previewRefs = useRef(new Map<string, HTMLDivElement>());
-  const entities = project.assets.filter((asset) => asset.kind !== "reference");
+  const entities = project.assets.filter((asset) => asset.kind !== "reference" && !(project.projectType === "science" && asset.kind === "character"));
   const references = project.assets.filter((asset) => asset.kind === "reference");
 
   const upload = useCallback((asset: ProjectAsset, file: File) => {
@@ -104,11 +104,11 @@ export function AssetWorkspace({ project, busy, onCreate, onUpdate, onUpload, on
   </Card>;
 
   return <div className="asset-workspace">
-    <div className="section-heading"><div><Typography.Title level={4}>项目资产</Typography.Title><Typography.Text type="secondary">上传参考图自动关联镜头。卡片中的文字是视觉设定；生图提示词在镜头的首尾帧面板中编辑。</Typography.Text></div>
+    <div className="section-heading"><div><Typography.Title level={4}>项目资产</Typography.Title><Typography.Text type="secondary">{project.projectType === "science" ? "上传自然对象、场景或实验装置等参考图，自动关联镜头。" : "上传参考图自动关联镜头。"}卡片中的文字是视觉设定；生图提示词在镜头的首尾帧面板中编辑。</Typography.Text></div>
       <Button type="primary" onClick={() => { form.resetFields(); setEditing({ id: "", kind: "reference", name: "", description: "", entityName: null, scopeShotIds: [], image: null, revision: 0 }); }} disabled={!project.shots.length}>新增其他参考</Button>
     </div>
-    {!project.shots.length ? <Alert type="info" showIcon message="导演完成分镜后，可在这里上传角色、场景和其他参考图。" /> : <>
-      <div className="asset-grid">{entities.length ? entities.map(entityCard) : <Empty description="导演规划没有角色或场景资产" />}</div>
+    {!project.shots.length ? <Alert type="info" showIcon message={project.projectType === "science" ? "导演完成分镜后，可在这里上传场景、自然对象、实验装置等参考图。" : "导演完成分镜后，可在这里上传角色、场景和其他参考图。"} /> : <>
+      {entities.length > 0 && <div className="asset-grid">{entities.map(entityCard)}</div>}
       <div className="section-heading asset-subheading"><div><Typography.Title level={5}>其他参考</Typography.Title><Typography.Text type="secondary">例如道具、服装或特定镜头需要的视觉元素。</Typography.Text></div></div>
       {references.length ? <div className="asset-grid">{references.map((asset) => <Card className="asset-card" key={asset.id}>
         <div className="asset-card-heading"><Typography.Text strong>{asset.name}</Typography.Text><Typography.Paragraph type="secondary">适用镜头：{asset.scopeShotIds.map((id) => project.shots.find((shot) => shot.id === id)?.title || id).join("、")}</Typography.Paragraph></div>

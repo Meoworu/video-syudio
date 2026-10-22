@@ -3,7 +3,9 @@ import type { Project } from "../types";
 
 function ProjectState({ project }: { project: Project }) {
   if (project.status === "generating") {
-    const stages: Record<string, string> = { outline: "正在构思故事大纲", shot_design: "正在设计场景与镜头" };
+    const stages: Record<string, string> = project.projectType === "science"
+      ? { outline: "正在规划科普大纲", shot_design: "正在设计知识讲解镜头" }
+      : { outline: "正在构思故事大纲", shot_design: "正在设计场景与镜头" };
     return <Alert showIcon type="info" message="导演正在规划项目" description={stages[project.directorStage] || "完成后页面会自动更新。"} />;
   }
   if (project.status === "failed") return <Alert showIcon type="error" message="导演规划失败" description={project.errorMessage || "请检查配置后重试。"} />;
@@ -42,7 +44,7 @@ function EditTimeline({ project }: { project: Project }) {
 export function ProjectOverview({ project, busy, onRetry }: { project: Project; busy: boolean; onRetry: () => void }) {
   const outline = project.directorOutline;
   const outlineItems = outline ? [
-    { key: "characters", label: `角色 · ${outline.characters.length}`, children: outline.characters.length ? <div className="detail-grid">{outline.characters.map((character) => <Card size="small" key={character.name}><Typography.Text strong>{character.name}</Typography.Text><Typography.Paragraph>{character.description}</Typography.Paragraph><Typography.Text type="secondary">外观：{character.visualIdentity}</Typography.Text></Card>)}</div> : <Empty description="暂无角色信息" /> },
+    ...(project.projectType === "science" ? [] : [{ key: "characters", label: `角色 · ${outline.characters.length}`, children: outline.characters.length ? <div className="detail-grid">{outline.characters.map((character) => <Card size="small" key={character.name}><Typography.Text strong>{character.name}</Typography.Text><Typography.Paragraph>{character.description}</Typography.Paragraph><Typography.Text type="secondary">外观：{character.visualIdentity}</Typography.Text></Card>)}</div> : <Empty description="暂无角色信息" /> }]),
     { key: "locations", label: `场景资产 · ${outline.locations.length}`, children: outline.locations.length ? <div className="detail-grid">{outline.locations.map((location) => <Card size="small" key={location.name}><Typography.Text strong>{location.name}</Typography.Text><Typography.Paragraph>{location.description}</Typography.Paragraph><Typography.Text type="secondary">视觉锚点：{location.visualIdentity}</Typography.Text></Card>)}</div> : <Empty description="暂无场景资产" /> },
     { key: "scenes", label: `场景推进 · ${outline.scenes.length}`, children: <div className="scene-list">{outline.scenes.map((scene) => <div className="scene-row" key={scene.index}><Tag>{String(scene.index + 1).padStart(2, "0")}</Tag><div><Typography.Text strong>{scene.title}</Typography.Text><Typography.Paragraph type="secondary">{scene.locationName}{scene.timeOfDay ? ` · ${scene.timeOfDay}` : ""}</Typography.Paragraph><Typography.Text>{scene.dramaticGoal} → {scene.conflict} → {scene.turningPoint} → {scene.outcome}</Typography.Text></div></div>)}</div> },
     { key: "style", label: "风格圣经", children: <Descriptions size="small" column={{ xs: 1, sm: 2 }} items={Object.entries(outline.styleBible).map(([key, value]) => ({ key, label: key, children: value }))} /> },
@@ -53,6 +55,7 @@ export function ProjectOverview({ project, busy, onRetry }: { project: Project; 
       <div className="project-hero-top"><div><Typography.Text className="eyebrow">项目概览</Typography.Text><Typography.Title level={2}>{project.title}</Typography.Title></div><ProjectState project={project} /></div>
       <Typography.Paragraph className="project-story">{project.story}</Typography.Paragraph>
       <Descriptions size="small" column={{ xs: 1, sm: 3 }} items={[
+        { key: "type", label: "项目类型", children: project.projectType === "science" ? "科普" : "普通故事" },
         { key: "aspect", label: "画面比例", children: project.aspectRatio },
         { key: "shots", label: "镜头数", children: `${project.shots.length} 个` },
         { key: "style", label: "视觉风格", children: project.style },

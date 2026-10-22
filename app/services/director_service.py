@@ -16,6 +16,7 @@ from app.domain.models import (
     Shot,
 )
 from app.services.editing import rebuild_edit_plan
+from app.services.project_type_policy import is_science, visual_constraint
 from app.store.project_store import ProjectStore
 
 
@@ -37,8 +38,10 @@ class DirectorService:
 
     def start_project(self, request: CreateProjectRequest, store: ProjectStore) -> Project:
         project = Project(
-            projectId=f"video_{uuid.uuid4().hex[:12]}", title="正在规划故事…",
-            story=request.story, aspectRatio=request.aspectRatio, style=request.style,
+            projectId=f"video_{uuid.uuid4().hex[:12]}",
+            title="正在规划科普主题…" if is_science(request.projectType) else "正在规划故事…",
+            story=request.story, projectType=request.projectType,
+            aspectRatio=request.aspectRatio, style=request.style,
             status="generating", directorStage="outline",
             directorRequest=request.model_dump(mode="json"),
         )
@@ -52,6 +55,8 @@ class DirectorService:
                 if project.status != "generating" or not project.directorRequest:
                     return
                 request = CreateProjectRequest.model_validate(project.directorRequest)
+                if request.projectType != project.projectType:
+                    raise ValueError("项目类型与创建请求不一致，请重新创建项目")
                 outline = project.directorOutline
             if outline is None:
                 outline = self._generate_outline(request)
@@ -61,6 +66,8 @@ class DirectorService:
                     project.title = outline.title
                     project.directorStage = "shot_design"
                     store.save(project)
+            elif is_science(project.projectType) and outline.characters:
+                raise ValueError("科普项目的大纲不能包含人物角色，请重新生成导演大纲")
             plans = self._generate_shots(request, outline)
             designed = self._build_project(project_id, request, outline, plans)
             with store.lock(project_id):
@@ -86,6 +93,10 @@ class DirectorService:
     def _build_project(self, project_id: str, request: CreateProjectRequest, outline: DirectorOutline, shot_plans: list[DirectorShotPlan]) -> Project:
         if len(shot_plans) != request.sceneCount:
             raise ValueError(f"导演分镜应包含 {request.sceneCount} 个镜头，实际返回 {len(shot_plans)} 个")
+        if is_science(request.projectType) and outline.characters:
+            raise ValueError("科普项目的大纲不能包含人物角色")
+        if is_science(request.projectType) and any(plan.visibleCharacters for plan in shot_plans):
+            raise ValueError("科普项目的镜头不能包含人物角色")
         shots = []
         for index, plan in enumerate(shot_plans):
             if plan.index != index or plan.sceneIndex >= len(outline.scenes):
@@ -102,11 +113,12 @@ class DirectorService:
                 f"{request.style}。本镜头叙事目的：{plan.narrativePurpose}。"
                 f"画面行动：{plan.beat}。摄影：{plan.camera}。"
                 f"严格从用户提供的首帧状态开始，并自然运动至尾帧状态；"
-                f"保持人物身份、服装、道具和场景连续，不新增主体。时序：{motion_text}。"
+                f"{('保持主体形态、比例、环境和过程连续，不新增主体。' if is_science(request.projectType) else '保持人物身份、服装、道具和场景连续，不新增主体。')}时序：{motion_text}。"
                 f"场景：{plan.locationName or scene.locationName}；连续性约束：{plan.continuityNotes}。"
                 f"必须出现：{'；'.join(plan.mustAppear)}。不得出现：{'；'.join(plan.forbiddenElements)}。"
                 f"全片风格：{json.dumps(outline.styleBible, ensure_ascii=False)}。"
                 "镜头间不要生成字幕、文字或旁白。"
+                f"{visual_constraint(request.projectType)}"
             )
             shots.append(Shot(
                 id=f"shot_{index + 1:03d}", index=index, sceneIndex=plan.sceneIndex,
@@ -126,7 +138,8 @@ class DirectorService:
             ))
         project = Project(
             projectId=project_id, title=outline.title,
-            story=request.story, aspectRatio=request.aspectRatio, style=request.style,
+            story=request.story, projectType=request.projectType,
+            aspectRatio=request.aspectRatio, style=request.style,
             directorOutline=outline, shots=shots,
         )
         rebuild_edit_plan(project)
@@ -134,9 +147,11 @@ class DirectorService:
 
     def _generate_outline(self, request: CreateProjectRequest) -> DirectorOutline:
         prompt = (
-            "你是短片导演和编剧。第一阶段只规划故事，不写镜头提示词。保持因果完整、人物动机清楚、"
-            "结尾有情绪或认知变化。只返回 JSON："
-            '{"title":"不超过42字","logline":"一句话故事","synopsis":"完整梗概",'
+            ("你是科普短片导演。第一阶段规划知识讲解，不写镜头提示词。按提问、观察、机制、结论组织内容；不创造人物角色。"
+             if is_science(request.projectType) else
+             "你是短片导演和编剧。第一阶段只规划故事，不写镜头提示词。保持因果完整、人物动机清楚、结尾有情绪或认知变化。")
+            + "只返回 JSON："
+            + '{"title":"不超过42字","logline":"一句话故事","synopsis":"完整梗概",'
             '"theme":"主题","characters":[{"name":"角色名","description":"动机与性格",'
             '"visualIdentity":"可持续识别的外观特征"}],"locations":[{"name":"地点",'
             '"description":"空间特征","visualIdentity":"跨镜头保持的环境视觉锚点"}],"scenes":[{"index":0,"title":"场名",'
@@ -144,7 +159,9 @@ class DirectorService:
             '"outcome":"结果及与下一场的衔接","locationName":"地点名","timeOfDay":"时段"}],"styleBible":{"visual":"整体影像语言",'
             '"lighting":"光线","color":"色彩","camera":"摄影风格","continuity":"连续性规则"}}。'
             f"场景数必须恰好 {request.sceneCount}。不要添加故事未提供的事实。"
-            f"\n故事：{request.story}\n画面比例：{request.aspectRatio}\n用户风格：{request.style}"
+            + ("科普项目 characters 必须严格为空数组；不得出现人物、主持人、旁观者、手部演示或拟人角色。"
+               if is_science(request.projectType) else "")
+            + f"\n故事：{request.story}\n画面比例：{request.aspectRatio}\n用户风格：{request.style}"
         )
         last_error: Exception | None = None
         for attempt in range(2):
@@ -153,6 +170,8 @@ class DirectorService:
                 outline = DirectorOutline.model_validate(raw)
                 if len(outline.scenes) != request.sceneCount:
                     raise ValueError(f"场景数量必须恰好为 {request.sceneCount}")
+                if is_science(request.projectType) and outline.characters:
+                    raise ValueError("科普项目 characters 必须为空数组")
                 return outline
             except (ValidationError, ValueError) as error:
                 last_error = error
@@ -163,7 +182,10 @@ class DirectorService:
         prompt = (
             "你是摄影指导。第二阶段将故事大纲变成可执行的图生视频分镜。"
             "每个镜头需有可供人工审核的首帧、尾帧描述与独立图像提示词；首尾状态必须有明确变化但保持主体连续。"
-            "运动节拍必须覆盖行动过程且不超镜头时长。画面中不生成字幕、文字和旁白。只返回 JSON："
+            "运动节拍必须覆盖行动过程且不超镜头时长。画面中不生成字幕、文字和旁白。"
+            + ("这是科普项目：以对象、场景和过程解释知识，不创建人物；visibleCharacters 必须严格为空数组。"
+               if is_science(request.projectType) else "")
+            + "只返回 JSON："
             '{"shots":[{"index":0,"sceneIndex":0,"title":"镜头标题","beat":"可见动作",'
             '"narrativePurpose":"镜头在故事中的作用","durationSeconds":5,"camera":"景别、机位、焦段感和运动",'
             '"visualDescription":"空间构图、人物位置、光线和可见信息","mustAppear":["必须出现的可见事实"],'
@@ -187,6 +209,8 @@ class DirectorService:
                 if not isinstance(items, list) or len(items) != request.sceneCount:
                     raise ValueError(f"shots 数组必须恰好包含 {request.sceneCount} 个元素")
                 plans = [DirectorShotPlan.model_validate(item) for item in items]
+                if is_science(request.projectType) and any(plan.visibleCharacters for plan in plans):
+                    raise ValueError("科普项目每个镜头的 visibleCharacters 必须为空数组")
                 for index, plan in enumerate(plans):
                     if plan.index != index or plan.sceneIndex >= len(outline.scenes):
                         raise ValueError("镜头 index 必须连续递增，sceneIndex 必须引用已规划场景")

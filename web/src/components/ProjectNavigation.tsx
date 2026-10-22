@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Button, Drawer, Empty, Form, Input, InputNumber, List, Popconfirm, Select, Space, Tag, Typography } from "antd";
+import { Button, Drawer, Empty, Form, Input, InputNumber, List, Popconfirm, Select, Space, Tag, Tooltip, Typography } from "antd";
+import { DeleteOutlined } from "@ant-design/icons";
 import { fileUrl } from "../api";
 import type { CreateProjectInput } from "../hooks/useStudioWorkspace";
 import type { Project } from "../types";
@@ -18,9 +19,10 @@ function CreateProjectDrawer({ open, busy, onClose, onCreate }: {
   open: boolean; busy: boolean; onClose: () => void; onCreate: (payload: CreateProjectInput) => Promise<Project | null>;
 }) {
   const [form] = Form.useForm<CreateProjectInput>();
+  const projectType = Form.useWatch("projectType", form) || "story";
 
   async function submit(values: CreateProjectInput) {
-    const result = await onCreate({ ...values, story: values.story.trim(), style: values.style.trim() });
+    const result = await onCreate({ ...values, projectType: values.projectType || "story", story: values.story.trim(), style: values.style.trim() });
     if (result) {
       form.resetFields();
       onClose();
@@ -28,10 +30,14 @@ function CreateProjectDrawer({ open, busy, onClose, onCreate }: {
   }
 
   return <Drawer title="创建视频项目" open={open} onClose={onClose} width="min(460px, 100vw)" destroyOnClose>
-    <Typography.Paragraph type="secondary">先描述故事，导演会生成大纲与镜头设计。</Typography.Paragraph>
-    <Form form={form} layout="vertical" initialValues={{ aspectRatio: "9:16", style: "cinematic animated short film", sceneCount: 3 }} onFinish={(values) => void submit(values)}>
-      <Form.Item name="story" label="故事梗概" rules={[{ required: true, whitespace: true, message: "请填写故事梗概" }]}>
-        <Input.TextArea rows={6} maxLength={6000} showCount placeholder="人物、目标、冲突和结局……" />
+    <Typography.Paragraph type="secondary">选择内容类型，导演会据此规划大纲与镜头。</Typography.Paragraph>
+    <Form form={form} layout="vertical" initialValues={{ projectType: "story", aspectRatio: "9:16", style: "cinematic animated short film", sceneCount: 3 }} onFinish={(values) => void submit(values)}>
+      <Form.Item name="projectType" label="项目类型" rules={[{ required: true }]}>
+        <Select options={[{ value: "story", label: "普通故事" }, { value: "science", label: "科普" }]} />
+      </Form.Item>
+      {projectType === "science" && <Typography.Paragraph type="secondary">科普项目不生成出镜人物；使用对象、场景和过程解释知识。</Typography.Paragraph>}
+      <Form.Item name="story" label={projectType === "science" ? "科普主题与内容" : "故事梗概"} rules={[{ required: true, whitespace: true, message: projectType === "science" ? "请填写科普主题与内容" : "请填写故事梗概" }]}>
+        <Input.TextArea rows={6} maxLength={6000} showCount placeholder={projectType === "science" ? "主题、现象、原理和希望说明的结论……" : "人物、目标、冲突和结局……"} />
       </Form.Item>
       <Form.Item name="aspectRatio" label="画面比例">
         <Select options={[{ value: "9:16", label: "竖屏 · 9:16" }, { value: "16:9", label: "横屏 · 16:9" }]} />
@@ -47,10 +53,11 @@ function CreateProjectDrawer({ open, busy, onClose, onCreate }: {
   </Drawer>;
 }
 
-export function ProjectNavigation({ projects, selectedId, jobs, busy, loading, onSelect, onCreate, onDeleteFailedVideo }: {
+export function ProjectNavigation({ projects, selectedId, jobs, busy, loading, onSelect, onCreate, onDeleteFailedVideo, onDeleteProject }: {
   projects: Project[]; selectedId?: string; jobs: VideoJob[]; busy: boolean; loading: boolean;
   onSelect: (id: string) => void; onCreate: (payload: CreateProjectInput) => Promise<Project | null>;
   onDeleteFailedVideo: (projectId: string, shotId: string) => Promise<Project | null>;
+  onDeleteProject: (projectId: string) => Promise<boolean>;
 }) {
   const [createOpen, setCreateOpen] = useState(false);
   const [jobsOpen, setJobsOpen] = useState(false);
@@ -63,12 +70,20 @@ export function ProjectNavigation({ projects, selectedId, jobs, busy, loading, o
       loading={loading}
       className="project-list"
       dataSource={projects}
-      renderItem={(project) => <List.Item key={project.projectId}>
-        <Button type={selectedId === project.projectId ? "primary" : "text"} block className="project-nav-item" onClick={() => onSelect(project.projectId)}>
-          <span className="project-nav-title">{project.title}</span>
-          <span className="project-nav-subtitle">{project.shots.length} 个镜头 · {project.aspectRatio}</span>
-        </Button>
-      </List.Item>}
+      renderItem={(project) => {
+        const active = project.status === "generating" || project.shots.some((shot) =>
+          ["submitting", "generating", "downloading"].includes(shot.video?.status || "") ||
+          Object.values(shot.frames).some((frame) => frame.job && ["queued", "generating"].includes(frame.job.status))
+        ) || jobs.some((job) => job.projectId === project.projectId && ["submitting", "generating", "downloading"].includes(job.status));
+        return <List.Item key={project.projectId} actions={[<Popconfirm key="delete" title={`删除项目“${project.title}”？`} description="项目及其本地图片、视频和音频将永久删除；不会取消远端任务。此操作不可恢复。" okText="永久删除" cancelText="取消" okButtonProps={{ danger: true }} onConfirm={() => onDeleteProject(project.projectId)}>
+          <Tooltip title={active ? "项目有任务正在运行，暂时不能删除" : "删除项目及其本地文件"}><span><Button aria-label={`删除项目 ${project.title}`} type="text" danger icon={<DeleteOutlined />} disabled={busy || active} /></span></Tooltip>
+        </Popconfirm>] }>
+          <Button type={selectedId === project.projectId ? "primary" : "text"} block className="project-nav-item" onClick={() => onSelect(project.projectId)}>
+            <span className="project-nav-title">{project.title}</span>
+            <span className="project-nav-subtitle">{project.shots.length} 个镜头 · {project.aspectRatio} · {project.projectType === "science" ? "科普" : "普通故事"}</span>
+          </Button>
+        </List.Item>;
+      }}
     /> : loading ? <div className="sidebar-loading"><Typography.Text type="secondary">正在加载项目…</Typography.Text></div> : <Empty className="sidebar-empty" image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有项目" />}
     <Button className="jobs-trigger" block onClick={() => setJobsOpen(true)}>查看视频任务 <span className="task-count">{jobs.length}</span></Button>
     <CreateProjectDrawer open={createOpen} busy={busy} onClose={() => setCreateOpen(false)} onCreate={onCreate} />

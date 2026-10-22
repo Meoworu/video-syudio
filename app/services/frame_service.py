@@ -12,6 +12,7 @@ from app.clients.google_image import GoogleImageClient
 from app.config import Settings
 from app.domain.models import FrameJob, FrameVersion, Project, Shot
 from app.services.asset_service import normalize_image, resolve_asset_references
+from app.services.project_type_policy import is_science, visual_constraint
 from app.store.project_store import ProjectStore
 
 
@@ -169,6 +170,7 @@ class FrameService:
             raise ValueError("请先填写首尾帧生成提示词")
         snapshot = {
             "prompt": prompt,
+            "projectType": project.projectType,
             "aspectRatio": project.aspectRatio,
             "style": project.style,
             "model": self.settings.google_image_model,
@@ -189,10 +191,16 @@ class FrameService:
             continuity = shot.continuityNotes
         labels = "；".join(reference["name"] for reference in snapshot["references"])
         frame_position = "视频开始瞬间" if role == "first" else "视频结束瞬间"
+        reference_continuity = (
+            "保持参考图中的主体形态、比例和场景特征。"
+            if is_science(snapshot.get("projectType", "story"))
+            else "保持参考图中的身份、服装、场景视觉特征。"
+        )
         return (
             f"生成一张 {snapshot['aspectRatio']} 画幅的电影分镜静帧，表现{frame_position}。整体风格：{snapshot['style']}。"
             f"镜头状态：{description}。用户提示词：{snapshot['prompt']}。连续性要求：{continuity}。"
-            f"参考图人物或场景标签：{labels}。保持参考图中的身份、服装、场景视觉特征。画面中不要生成文字、字幕或水印。"
+            f"参考图主体或场景标签：{labels}。{reference_continuity}画面中不要生成文字、字幕或水印。"
+            f"{visual_constraint(snapshot.get('projectType', 'story'))}"
         )
 
     def _complete(self, project_id: str, shot_id: str, role: str, job_id: str, snapshot: dict[str, Any], version_id: str, path: str, first_frame_id: str | None) -> None:

@@ -10,7 +10,11 @@ from app.store.project_store import ProjectStore
 
 
 class FakeVideoClient:
+    def __init__(self):
+        self.create_args = None
+
     def create_interaction(self, **kwargs):
+        self.create_args = kwargs
         assert kwargs["aspect_ratio"] == "9:16"
         return "interaction-1"
 
@@ -51,6 +55,32 @@ def test_video_service_persists_complete_result(tmp_path: Path) -> None:
     assert result.status == "complete", result.errorMessage
     assert result.provider == "google_gemini_omni_1_1"
     assert (store.project_dir(project.projectId) / result.path).read_bytes() == b"video"
+
+
+def test_science_video_appends_constraint_after_editable_prompt(tmp_path: Path) -> None:
+    store = ProjectStore(tmp_path)
+    project = Project(
+        projectId="video_science1234", title="科普", story="海水蒸发", projectType="science",
+        aspectRatio="9:16", style="style",
+        shots=[Shot(id="shot_001", index=0, title="蒸發", prompt="用户编辑过的提示词", durationSeconds=5)],
+    )
+    store.create(project)
+    first = store.save_upload(project.projectId, "shot_001", "first", b"first")
+    last = store.save_upload(project.projectId, "shot_001", "last", b"last")
+    project = store.get(project.projectId)
+    project.shots[0].frames["first"].versions = [FrameVersion(id="first-v1", path=str(first.relative_to(store.project_dir(project.projectId))))]
+    project.shots[0].frames["first"].selectedVersionId = "first-v1"
+    project.shots[0].frames["last"].versions = [FrameVersion(id="last-v1", path=str(last.relative_to(store.project_dir(project.projectId))))]
+    project.shots[0].frames["last"].selectedVersionId = "last-v1"
+    store.save(project)
+    client = FakeVideoClient()
+    service = VideoService(Settings(_env_file=None, GOOGLE_VIDEO_API_KEY="video-key"), store, client=client)
+
+    service.run(project.projectId, "shot_001")
+
+    assert client.create_args is not None
+    assert client.create_args["prompt"].startswith("用户编辑过的提示词")
+    assert "禁止出现人类" in client.create_args["prompt"]
 
 
 @pytest.mark.parametrize("provider", ["google_vertex", "google_gemini", "google_agent_platform"])

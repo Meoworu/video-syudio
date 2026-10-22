@@ -26,6 +26,11 @@ function Studio() {
     onSelect={(id) => { void workspace.selectProject(id); setMobileProjectsOpen(false); }}
     onCreate={workspace.create}
     onDeleteFailedVideo={workspace.actions.deleteFailedVideo}
+    onDeleteProject={async (id) => {
+      const deleted = await workspace.removeProject(id);
+      if (deleted) setMobileProjectsOpen(false);
+      return deleted;
+    }}
   />;
 
   const tabItems = project ? [
