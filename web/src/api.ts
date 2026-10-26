@@ -62,6 +62,10 @@ export function uploadAssetImage(projectId: string, assetId: string, file: File)
   return request<Project>(`/projects/${projectId}/assets/${assetId}/image`, { method: "POST", headers: { "Content-Type": file.type }, body: file });
 }
 
+export function generateAssetImage(projectId: string, assetId: string, requestId: string) {
+  return request<Project>(`/projects/${projectId}/assets/${assetId}/generate-image`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ requestId }) });
+}
+
 export function deleteAsset(projectId: string, assetId: string) {
   return request<Project>(`/projects/${projectId}/assets/${assetId}`, { method: "DELETE" });
 }

@@ -5,11 +5,12 @@ import type { Project, ProjectAsset } from "../types";
 
 type AssetPayload = { name: string; description?: string; scopeShotIds: string[] };
 
-export function AssetWorkspace({ project, busy, onCreate, onUpdate, onUpload, onDelete }: {
+export function AssetWorkspace({ project, busy, onCreate, onUpdate, onUpload, onGenerate, onDelete }: {
   project: Project; busy: boolean;
   onCreate: (payload: AssetPayload) => Promise<Project | null>;
   onUpdate: (assetId: string, payload: AssetPayload) => Promise<Project | null>;
   onUpload: (assetId: string, file: File) => Promise<Project | null>;
+  onGenerate: (assetId: string) => Promise<Project | null>;
   onDelete: (assetId: string) => Promise<Project | null>;
 }) {
   const { message } = App.useApp();
@@ -19,6 +20,37 @@ export function AssetWorkspace({ project, busy, onCreate, onUpdate, onUpload, on
   const previewRefs = useRef(new Map<string, HTMLDivElement>());
   const entities = project.assets.filter((asset) => asset.kind !== "reference");
   const references = project.assets.filter((asset) => asset.kind === "reference");
+
+  function imagePrompt(asset: ProjectAsset) {
+    const subject = asset.entityName || asset.name;
+    const description = asset.description.trim() || "根据名称呈现清晰、可辨识的视觉形象";
+    const kind = asset.kind === "character" ? "角色或生物主体" : asset.kind === "location" ? "场景" : "视觉参考资产";
+    const identity = project.projectType === "science" ? "保持生物真实形态，不拟人化" : "保持主体身份与外观设定稳定";
+    const scienceConstraint = project.projectType === "science"
+      ? "科普画面禁止出现人类、主持人、旁观者、手部演示、人物剪影及拟人化角色；原文明确的真实动物、昆虫等生物主体可以出现并保持非拟人化；只展示真实对象、自然过程、实验装置或非拟人化的科学示意。"
+      : "";
+    return `为视频项目生成一张${kind}设定参考图。主体：${subject}。视觉描述：${description}。项目视频风格：${project.style}。画面简洁、主体清晰、适合作为后续分镜生成的参考图。${identity}画面中不要出现文字、字幕、标签或水印。${scienceConstraint}`;
+  }
+
+  async function copyPrompt(asset: ProjectAsset) {
+    try {
+      await navigator.clipboard.writeText(imagePrompt(asset));
+      message.success("资产提示词已复制");
+    } catch {
+      message.error("复制失败，请检查浏览器剪贴板权限");
+    }
+  }
+
+  function imageActions(asset: ProjectAsset) {
+    const generating = asset.imageJob?.status === "queued" || asset.imageJob?.status === "generating";
+    return <>
+      <Button type="primary" loading={generating} disabled={busy || generating} onClick={() => void onGenerate(asset.id)}>
+        {generating ? "图片生成中" : asset.image ? "重新生成图片" : "一键生成图片"}
+      </Button>
+      <Button disabled={busy || generating} onClick={() => void copyPrompt(asset)}>复制资产提示词</Button>
+      {asset.imageJob?.status === "failed" && <Typography.Text type="danger">生成失败：{asset.imageJob.errorMessage || "请稍后重试"}</Typography.Text>}
+    </>;
+  }
 
   const upload = useCallback((asset: ProjectAsset, file: File) => {
     if (busy) {
@@ -101,6 +133,7 @@ export function AssetWorkspace({ project, busy, onCreate, onUpdate, onUpload, on
     </div>
     {imagePreview(asset)}
     <div className="asset-related"><Typography.Text type="secondary">自动关联 {project.shots.filter((shot) => asset.kind === "character" ? shot.visibleCharacters.includes(asset.entityName || asset.name) : shot.locationName === (asset.entityName || asset.name)).length} 个镜头</Typography.Text>
+      <Space wrap>{imageActions(asset)}</Space>
       <Upload accept="image/png,image/jpeg,image/webp" showUploadList={false} beforeUpload={(file) => upload(asset, file)}><Button disabled={busy}>{asset.image ? "替换参考图" : "上传参考图"}</Button></Upload>
       {asset.image && <Popconfirm title="删除这张参考图？" description="相关镜头下次生成时将不再使用它。" okText="删除图片" cancelText="取消" onConfirm={() => void onDelete(asset.id)}><Button danger disabled={busy}>删除图片</Button></Popconfirm>}
     </div>
@@ -117,7 +150,7 @@ export function AssetWorkspace({ project, busy, onCreate, onUpdate, onUpload, on
       {references.length ? <div className="asset-grid">{references.map((asset) => <Card className="asset-card" key={asset.id}>
         <div className="asset-card-heading"><Typography.Text strong>{asset.name}</Typography.Text><Typography.Paragraph type="secondary">适用镜头：{asset.scopeShotIds.map((id) => project.shots.find((shot) => shot.id === id)?.title || id).join("、")}</Typography.Paragraph></div>
         {imagePreview(asset)}
-        <Space wrap><Upload accept="image/png,image/jpeg,image/webp" showUploadList={false} beforeUpload={(file) => upload(asset, file)}><Button disabled={busy}>{asset.image ? "替换参考图" : "上传参考图"}</Button></Upload><Button disabled={busy} onClick={() => { setEditing(asset); form.setFieldsValue({ name: asset.name, description: asset.description, scopeShotIds: asset.scopeShotIds }); }}>编辑范围</Button><Popconfirm title="删除这个资产？" okText="删除" cancelText="取消" onConfirm={() => void onDelete(asset.id)}><Button danger disabled={busy}>删除</Button></Popconfirm></Space>
+        <Space wrap>{imageActions(asset)}<Upload accept="image/png,image/jpeg,image/webp" showUploadList={false} beforeUpload={(file) => upload(asset, file)}><Button disabled={busy}>{asset.image ? "替换参考图" : "上传参考图"}</Button></Upload><Button disabled={busy} onClick={() => { setEditing(asset); form.setFieldsValue({ name: asset.name, description: asset.description, scopeShotIds: asset.scopeShotIds }); }}>编辑范围</Button><Popconfirm title="删除这个资产？" okText="删除" cancelText="取消" onConfirm={() => void onDelete(asset.id)}><Button danger disabled={busy}>删除</Button></Popconfirm></Space>
       </Card>)}</div> : <Empty description="还没有其他参考资产" />}
     </>}
     <Modal title={editing?.id ? "编辑其他参考" : "新增其他参考"} open={!!editing} onCancel={() => setEditing(null)} onOk={() => void form.submit()} confirmLoading={busy} destroyOnClose>

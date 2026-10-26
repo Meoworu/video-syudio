@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   assembleProject, cancelVideo, createAsset, createProject, deleteAsset, deleteFailedFrameJob, deleteFailedVideo, deleteProject, generateAllVideos,
-  generateFrame, generateFrames, generateManuscript, generateNarrationAudio, generateVideo, getProject, listProjects, listVideoJobs,
+  generateAssetImage, generateFrame, generateFrames, generateManuscript, generateNarrationAudio, generateVideo, getProject, listProjects, listVideoJobs,
   ApiError, retryDirector, selectFrameVersion, selectNarrationTake, updateAsset, updateFrameConfig, updateNarrationManuscript, updateShot, uploadAssetImage, uploadFrame,
 } from "../api";
 import type { Project, Shot } from "../types";
@@ -219,6 +219,7 @@ export function useStudioWorkspace() {
     createAsset: (projectId: string, payload: { name: string; description?: string; scopeShotIds: string[] }) => run(() => createAsset(projectId, payload)),
     updateAsset: (projectId: string, assetId: string, payload: { name: string; description?: string; scopeShotIds: string[] }) => run(() => updateAsset(projectId, assetId, payload)),
     uploadAssetImage: (projectId: string, assetId: string, file: File) => run(() => uploadAssetImage(projectId, assetId, file)),
+    generateAssetImage: (projectId: string, assetId: string) => run(() => generateAssetImage(projectId, assetId, crypto.randomUUID())),
     deleteAsset: (projectId: string, assetId: string) => run(() => deleteAsset(projectId, assetId)),
     updateFrameConfig: (projectId: string, shotId: string, role: "first" | "last", payload: { prompt: string; referenceMode: "auto" | "manual"; assetIds: string[]; restoreDefaultPrompt?: boolean }) => run(() => updateFrameConfig(projectId, shotId, role, payload)),
     generateFrame: (projectId: string, shotId: string, role: "first" | "last") => run(() => generateFrame(projectId, shotId, role, crypto.randomUUID())),

@@ -39,6 +39,7 @@ function Studio() {
       onCreate={(payload) => workspace.actions.createAsset(project.projectId, payload)}
       onUpdate={(assetId, payload) => workspace.actions.updateAsset(project.projectId, assetId, payload)}
       onUpload={(assetId, file) => workspace.actions.uploadAssetImage(project.projectId, assetId, file)}
+      onGenerate={(assetId) => workspace.actions.generateAssetImage(project.projectId, assetId)}
       onDelete={(assetId) => workspace.actions.deleteAsset(project.projectId, assetId)}
     /> },
     { key: "shots", label: `分镜 · ${project.shots.length}`, children: <ShotWorkspace

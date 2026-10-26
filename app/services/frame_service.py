@@ -12,12 +12,11 @@ from app.clients.google_image import GoogleImageClient
 from app.config import Settings
 from app.domain.models import FrameJob, FrameVersion, Project, Shot
 from app.services.asset_service import normalize_image, resolve_asset_references
+from app.services.image_generation_limits import image_generation_semaphore
 from app.services.project_type_policy import is_science, visual_constraint
 from app.store.project_store import ProjectStore
 
 
-_SEMAPHORE_LOCK = threading.Lock()
-_SEMAPHORES: dict[tuple[str, int], threading.BoundedSemaphore] = {}
 _ACTIVE_GROUPS_LOCK = threading.Lock()
 _ACTIVE_GROUPS: set[tuple[str, str]] = set()
 
@@ -251,6 +250,4 @@ class FrameService:
         return path
 
     def _semaphore(self) -> threading.BoundedSemaphore:
-        key = (str(self.store.root.resolve()), self.settings.google_image_max_concurrency)
-        with _SEMAPHORE_LOCK:
-            return _SEMAPHORES.setdefault(key, threading.BoundedSemaphore(key[1]))
+        return image_generation_semaphore(self.settings, self.store)

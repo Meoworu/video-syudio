@@ -9,6 +9,7 @@ from app.api.projects import get_store
 from app.config import Settings, get_settings
 from app.domain.models import CreateAssetRequest, GenerateFrameRequest, Project, ProjectAsset, UpdateFrameConfigRequest
 from app.services.asset_service import InvalidImageError, normalize_image, save_asset_image
+from app.services.asset_image_service import AssetImageService
 from app.services.frame_service import FrameService
 from app.store.project_store import ProjectStore
 
@@ -41,6 +42,10 @@ def _asset_in_use(project: Project, asset_id: str) -> bool:
     )
 
 
+def _asset_generating(asset: ProjectAsset) -> bool:
+    return bool(asset.imageJob and asset.imageJob.status in {"queued", "generating"})
+
+
 @router.post("/{project_id}/assets", response_model=Project, status_code=status.HTTP_201_CREATED)
 def create_asset(project_id: str, payload: CreateAssetRequest, store: ProjectStore = Depends(get_store)) -> Project:
     project = _project(store, project_id)
@@ -67,6 +72,8 @@ def update_asset(project_id: str, asset_id: str, payload: CreateAssetRequest, st
     with store.lock(project_id):
         project = _project(store, project_id)
         asset = _asset(project, asset_id)
+        if _asset_generating(asset):
+            raise HTTPException(status_code=409, detail="此资产正在生成图片")
         if asset.kind != "reference":
             raise HTTPException(status_code=409, detail="角色和场景资产名称由导演规划维护")
         if _asset_in_use(project, asset_id):
@@ -98,13 +105,32 @@ async def upload_asset_image(project_id: str, asset_id: str, request: Request, s
         with store.lock(project_id):
             project = _project(store, project_id)
             asset = _asset(project, asset_id)
+            if _asset_generating(asset):
+                raise HTTPException(status_code=409, detail="此资产正在生成图片")
             if _asset_in_use(project, asset_id):
                 raise HTTPException(status_code=409, detail="此资产正在用于图片生成")
             save_asset_image(store, project_id, asset, normalized, width, height)
+            asset.imageJob = None
             store.save(project)
             return project
 
     return await run_in_threadpool(persist_image)
+
+
+@router.post("/{project_id}/assets/{asset_id}/generate-image", response_model=Project, status_code=status.HTTP_202_ACCEPTED)
+def generate_asset_image(project_id: str, asset_id: str, payload: GenerateFrameRequest, background_tasks: BackgroundTasks, settings: Settings = Depends(get_settings), store: ProjectStore = Depends(get_store)) -> Project:
+    with store.lock(project_id):
+        project = _project(store, project_id)
+        asset = _asset(project, asset_id)
+        if project.status != "ready":
+            raise HTTPException(status_code=409, detail="导演规划完成后才能生成资产图片")
+        try:
+            job_id = AssetImageService(settings, store).enqueue(project, asset, payload.requestId)
+        except ValueError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        store.save(project)
+        background_tasks.add_task(AssetImageService(settings, store).run, project_id, asset_id, job_id)
+        return project
 
 
 @router.delete("/{project_id}/assets/{asset_id}", response_model=Project)
@@ -112,12 +138,15 @@ def delete_asset(project_id: str, asset_id: str, store: ProjectStore = Depends(g
     with store.lock(project_id):
         project = _project(store, project_id)
         asset = _asset(project, asset_id)
+        if _asset_generating(asset):
+            raise HTTPException(status_code=409, detail="此资产正在生成图片")
         if _asset_in_use(project, asset_id):
             raise HTTPException(status_code=409, detail="此资产正在用于图片生成")
         if asset.kind == "reference":
             project.assets.remove(asset)
         else:
             asset.image = None
+            asset.imageJob = None
             asset.revision += 1
         store.save(project)
         return project

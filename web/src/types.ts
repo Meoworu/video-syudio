@@ -35,6 +35,7 @@ export type ProjectAsset = {
   id: string; kind: "character" | "location" | "reference"; name: string; description: string;
   entityName?: string | null; scopeShotIds: string[];
   image?: { imageId: string; path: string; mimeType: string; size: number; width: number; height: number } | null;
+  imageJob?: { id: string; requestId: string; status: "queued" | "generating" | "complete" | "failed"; errorMessage?: string | null; inputSnapshot: { prompt?: string } } | null;
   revision: number;
 };
 

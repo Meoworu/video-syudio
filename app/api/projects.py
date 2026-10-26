@@ -69,7 +69,7 @@ def delete_project(project_id: str, store: ProjectStore = Depends(get_store)) ->
             shot.video and shot.video.status in active_video_statuses or any(
                 shot.frames[role].job and shot.frames[role].job.status in {"queued", "generating"} for role in ("first", "last")
             ) for shot in project.shots
-        ):
+        ) or any(asset.imageJob and asset.imageJob.status in {"queued", "generating"} for asset in project.assets):
             raise HTTPException(status_code=409, detail="项目仍有运行中的任务，请完成或取消任务后再删除")
         try:
             store.delete_project(project_id)

@@ -348,6 +348,7 @@ class ProjectAsset(BaseModel):
     entityName: str | None = None
     scopeShotIds: list[str] = Field(default_factory=list)
     image: AssetImage | None = None
+    imageJob: FrameJob | None = None
     revision: int = 0
 
 

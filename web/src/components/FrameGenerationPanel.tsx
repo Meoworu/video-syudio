@@ -28,6 +28,7 @@ function FrameCard({ project, shot, role, config, slot, busy, onConfig, onDraftC
   onDeleteFailed: (role: Role) => Promise<Project | null>;
   onUpload: (role: Role, file: File) => Promise<Project | null>;
 }) {
+  const { message } = App.useApp();
   const title = role === "first" ? "首帧" : "尾帧";
   const frameDescription = role === "first" ? shot.firstFrameDescription : shot.lastFrameDescription;
   const slotJob = slot.job;
@@ -36,6 +37,16 @@ function FrameCard({ project, shot, role, config, slot, busy, onConfig, onDraftC
   const refs = resolveAssets(project, shot, config);
   const firstFrameChanged = role === "last" && current?.source === "generated" && current.firstFrameVersionId !== shot.frames.first.selectedVersionId;
   const stale = Boolean(current && (current.promptSnapshot !== config.prompt || firstFrameChanged || current.source === "generated" && JSON.stringify([...current.referenceSnapshots].sort()) !== JSON.stringify(refs.map((asset) => `${asset.id}:${asset.image?.imageId}`).sort())));
+
+  async function copyPrompt() {
+    try {
+      await navigator.clipboard.writeText(config.prompt);
+      message.success(`${title}提示词已复制`);
+    } catch {
+      message.error("复制失败，请检查浏览器剪贴板权限");
+    }
+  }
+
   return <Card size="small" className="frame-generation-card" title={title} extra={<Tag color={generating ? "processing" : slotJob?.status === "failed" ? "error" : current ? "success" : "default"}>{generating ? slotJob?.status === "queued" ? "排队中" : "生成中" : slotJob?.status === "failed" ? "生成失败" : current ? "已就绪" : "待生成"}</Tag>}>
     <div className="frame-reference-list">{refs.length ? refs.map((asset) => <Space key={asset.id} size={8}><img src={fileUrl(project.projectId, asset.image!.path)} alt="" /><Typography.Text>{asset.name}</Typography.Text></Space>) : <Typography.Text type="secondary">{config.referenceMode === "manual" ? "请选择参考资产" : "暂无匹配的参考资产"}</Typography.Text>}
       {config.referenceMode === "auto" && project.assets.filter((asset) => !asset.image && (asset.kind === "character" && shot.visibleCharacters.some((name) => normalizeName(name) === normalizeName(asset.entityName || asset.name)) || asset.kind === "location" && normalizeName(shot.locationName) === normalizeName(asset.entityName || asset.name))).map((asset) => <Tag color="warning" key={asset.id}>请上传：{asset.name}</Tag>)}
@@ -44,6 +55,7 @@ function FrameCard({ project, shot, role, config, slot, busy, onConfig, onDraftC
     <label className="field-label">生成提示词<Input.TextArea value={config.prompt} maxLength={8000} rows={4} onChange={(event) => onDraftChange(role, { ...config, prompt: event.target.value })} /></label>
     <div className="frame-reference-config"><Select value={config.referenceMode} onChange={(referenceMode) => onDraftChange(role, { ...config, referenceMode, assetIds: referenceMode === "manual" ? config.assetIds : [] })} options={[{ value: "auto", label: "自动关联资产" }, { value: "manual", label: "手动选择资产" }]} />
       {config.referenceMode === "manual" && <Select mode="multiple" value={config.assetIds} onChange={(assetIds) => onDraftChange(role, { ...config, assetIds })} placeholder="选择参考图" options={project.assets.filter((asset) => asset.image).map((asset) => ({ value: asset.id, label: asset.name }))} />}
+      <Button disabled={!config.prompt.trim()} onClick={() => void copyPrompt()}>复制提示词</Button>
       <Button disabled={busy || generating || !config.prompt.trim()} onClick={() => void onConfig(role, config)}>保存配置</Button>
       <Button disabled={busy || generating} onClick={() => onDraftChange(role, { ...config, prompt: role === "first" ? shot.directorFirstFramePrompt : shot.directorLastFramePrompt })}>恢复导演提示词</Button>
     </div>

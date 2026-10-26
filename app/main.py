@@ -33,6 +33,15 @@ async def resume_video_tasks() -> None:
             _RECOVERY_TASKS.add(task)
             task.add_done_callback(_RECOVERY_TASKS.discard)
             continue
+        interrupted_assets = [asset.id for asset in project.assets if asset.imageJob and asset.imageJob.status in {"queued", "generating"}]
+        if interrupted_assets:
+            with store.lock(project.projectId):
+                current = store.get(project.projectId)
+                for asset in current.assets:
+                    if asset.id in interrupted_assets and asset.imageJob and asset.imageJob.status in {"queued", "generating"}:
+                        asset.imageJob.status = "failed"
+                        asset.imageJob.errorMessage = "服务重启时图片任务中断，请手动重新生成"
+                store.save(current)
         for shot in project.shots:
             for role in ("first", "last"):
                 job = shot.frames[role].job

@@ -7,11 +7,24 @@ import uuid
 from PIL import Image, ImageOps, UnidentifiedImageError
 
 from app.domain.models import AssetImage, Project, ProjectAsset, Shot
+from app.services.project_type_policy import is_science, visual_constraint
 from app.store.project_store import ProjectStore
 
 
 MAX_IMAGE_BYTES = 6_000_000
 MAX_IMAGE_PIXELS = 40_000_000
+
+
+def build_asset_image_prompt(project: Project, asset: ProjectAsset) -> str:
+    subject = asset.entityName or asset.name
+    description = asset.description.strip() or "根据名称呈现清晰、可辨识的视觉形象"
+    kind = "角色或生物主体" if asset.kind == "character" else "场景" if asset.kind == "location" else "视觉参考资产"
+    identity = "保持生物真实形态，不拟人化" if is_science(project.projectType) else "保持主体身份与外观设定稳定"
+    return (
+        f"为视频项目生成一张{kind}设定参考图。主体：{subject}。视觉描述：{description}。"
+        f"项目视频风格：{project.style}。画面简洁、主体清晰、适合作为后续分镜生成的参考图。"
+        f"{identity}画面中不要出现文字、字幕、标签或水印。{visual_constraint(project.projectType)}"
+    )
 
 
 class InvalidImageError(ValueError):
