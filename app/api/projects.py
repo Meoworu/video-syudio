@@ -323,7 +323,7 @@ def generate_all_videos(
                 continue
             if any(shot.frames[role].job and shot.frames[role].job.status in {"queued", "generating"} for role in ("first", "last")):
                 continue
-            shot.video = ShotVideo(provider="google_gemini_omni_1_1", model=settings.google_omni_model, status="submitting")
+            shot.video = ShotVideo(provider="google_agent_platform_omni_1_1", model=settings.google_omni_model, status="submitting")
             pending.append(shot.id)
         if not pending:
             raise HTTPException(status_code=409, detail="没有可提交的视频镜头；请检查首尾帧和任务状态")

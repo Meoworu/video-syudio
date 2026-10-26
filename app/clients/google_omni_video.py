@@ -9,8 +9,6 @@ import subprocess
 import time
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
-
 import httpx
 
 from app.clients.google_client import build_google_video_client, safe_google_error
@@ -62,20 +60,19 @@ class GoogleOmniVideoClient:
             response = self.client.interactions.create(
                 model=self.settings.google_omni_model,
                 input=[
-                    self._image_input(first_frame),
-                    self._image_input(last_frame),
                     {"type": "text", "text": (
                         f"{prompt}\nCreate a video about {duration_seconds} seconds long. "
-                        "[# Sources <FIRST_FRAME>@Image1 <LAST_FRAME>@Image2] "
-                        "Use Image1 as the first frame and Image2 as the last frame."
+                        "Use the first supplied image as the first frame and the second supplied image as the last frame."
                     )},
+                    self._image_input(first_frame),
+                    self._image_input(last_frame),
                 ],
                 background=True,
                 store=True,
-                response_format={
+                response_format=[{
                     "type": "video", "aspect_ratio": aspect_ratio,
-                    "delivery": "uri", "duration": f"{duration_seconds}s",
-                },
+                    "delivery": "inline", "duration": f"{duration_seconds}s",
+                }],
                 generation_config={"video_config": {"task": "image_to_video"}},
             )
         except Exception as error:
@@ -84,7 +81,7 @@ class GoogleOmniVideoClient:
             ) from None
         interaction_id = _read(response, "id")
         if not interaction_id:
-            raise GoogleOmniVideoError("Google Omni 提交结果未知：未返回 Interaction ID。请先检查 Gemini API 活动记录，再手动决定是否重试")
+            raise GoogleOmniVideoError("Google Omni 提交结果未知：未返回 Interaction ID。请先检查 Agent Platform 活动记录，再手动决定是否重试")
         return str(interaction_id)
 
     def get_interaction(self, remote_job_id: str) -> Any:
@@ -134,22 +131,17 @@ class GoogleOmniVideoClient:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         partial_path = output_path.with_name(f"{output_path.stem}.part{output_path.suffix}")
         data = _read(video, "data")
-        uri = _read(video, "uri")
         try:
             if data:
-                video_bytes = memoryview(base64.b64decode(str(data), validate=True))
+                video_bytes = memoryview(
+                    base64.b64decode(data, validate=True) if isinstance(data, str) else bytes(data)
+                )
                 with partial_path.open("wb") as output_file:
                     writer = _CancelableWriter(output_file, cancel_check)
                     for offset in range(0, len(video_bytes), 1024 * 1024):
                         writer.write(video_bytes[offset:offset + 1024 * 1024])
-            elif uri:
-                file_name = _gemini_file_name(str(uri))
-                if not file_name:
-                    raise GoogleOmniVideoError("Gemini 返回了不受支持的视频文件地址")
-                file_resource = self._wait_for_file(file_name, cancel_check=cancel_check)
-                self.client.files.download(file=file_resource, destination=str(partial_path))
             else:
-                raise GoogleOmniVideoError("Google Omni 返回了不支持的视频位置")
+                raise GoogleOmniVideoError("Agent Platform 未返回内联视频数据")
             if cancel_check and cancel_check():
                 raise GoogleOmniVideoCancelled("视频任务已取消")
             result = subprocess.run(
@@ -172,33 +164,6 @@ class GoogleOmniVideoClient:
         except Exception as error:
             partial_path.unlink(missing_ok=True)
             raise GoogleOmniVideoError(f"视频校验失败：{safe_google_error(error, self.settings)}") from None
-
-    def _wait_for_file(self, name: str, *, cancel_check=None) -> Any:
-        deadline = time.monotonic() + self.settings.google_request_timeout_seconds
-        while True:
-            if cancel_check and cancel_check():
-                raise GoogleOmniVideoCancelled("视频任务已取消")
-            try:
-                resource = self.client.files.get(name=name)
-            except Exception as error:
-                if not _is_transient_error(error):
-                    raise GoogleOmniVideoError(f"Gemini 文件查询失败：{safe_google_error(error, self.settings)}") from None
-                if time.monotonic() >= deadline:
-                    raise GoogleOmniVideoError(
-                        f"等待 Gemini 视频文件就绪超时：{safe_google_error(error, self.settings)}"
-                    ) from None
-                time.sleep(min(self.settings.google_poll_interval_seconds, max(0, deadline - time.monotonic())))
-                continue
-            state = str(_read(resource, "state") or "").split(".")[-1].upper()
-            if state == "ACTIVE":
-                return resource
-            if state == "FAILED":
-                raise GoogleOmniVideoError("Gemini 视频文件处理失败")
-            if state not in {"PROCESSING", "STATE_UNSPECIFIED", ""}:
-                raise GoogleOmniVideoError(f"Gemini 视频文件状态异常：{state}")
-            if time.monotonic() >= deadline:
-                raise GoogleOmniVideoError("等待 Gemini 视频文件就绪超时")
-            time.sleep(min(self.settings.google_poll_interval_seconds, max(0, deadline - time.monotonic())))
 
     @staticmethod
     def _image_input(path: Path) -> dict[str, Any]:
@@ -230,24 +195,6 @@ def _find_video(value: Any) -> Any | None:
             if _read(item, "type") == "video" or mime_type.startswith("video/"):
                 return item
     return None
-
-
-def _gemini_file_name(uri: str) -> str | None:
-    if uri.startswith("files/"):
-        name = uri
-    else:
-        parsed = urlparse(uri)
-        if parsed.scheme != "https" or parsed.hostname != "generativelanguage.googleapis.com":
-            return None
-        if parsed.username or parsed.password or parsed.port or parsed.query or parsed.fragment:
-            return None
-        prefix = "/v1beta/files/"
-        if not parsed.path.startswith(prefix):
-            return None
-        name = f"files/{parsed.path[len(prefix):]}"
-    if not re.fullmatch(r"files/[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?", name):
-        return None
-    return name
 
 
 def _http_status(error: Exception) -> int | None:

@@ -48,12 +48,12 @@ def test_video_service_persists_complete_result(tmp_path: Path) -> None:
     project.shots[0].frames["last"].versions = [FrameVersion(id="last-v1", path=last_path)]
     project.shots[0].frames["last"].selectedVersionId = "last-v1"
     store.save(project)
-    service = VideoService(Settings(_env_file=None, GOOGLE_VIDEO_API_KEY="video-key"), store, client=FakeVideoClient())
+    service = VideoService(Settings(_env_file=None, GOOGLE_CLOUD_PROJECT="trial-project"), store, client=FakeVideoClient())
     service.run(project.projectId, "shot_001")
     result = store.get(project.projectId).shots[0].video
     assert result is not None
     assert result.status == "complete", result.errorMessage
-    assert result.provider == "google_gemini_omni_1_1"
+    assert result.provider == "google_agent_platform_omni_1_1"
     assert (store.project_dir(project.projectId) / result.path).read_bytes() == b"video"
 
 
@@ -74,7 +74,7 @@ def test_science_video_appends_constraint_after_editable_prompt(tmp_path: Path) 
     project.shots[0].frames["last"].selectedVersionId = "last-v1"
     store.save(project)
     client = FakeVideoClient()
-    service = VideoService(Settings(_env_file=None, GOOGLE_VIDEO_API_KEY="video-key"), store, client=client)
+    service = VideoService(Settings(_env_file=None, GOOGLE_CLOUD_PROJECT="trial-project"), store, client=client)
 
     service.run(project.projectId, "shot_001")
 

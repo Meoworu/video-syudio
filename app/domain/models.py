@@ -395,7 +395,7 @@ class FrameSlot(BaseModel):
 
 
 class ShotVideo(BaseModel):
-    provider: Literal["google_vertex", "google_gemini", "google_agent_platform", "google_gemini_omni_1_1"] = "google_agent_platform"
+    provider: Literal["google_vertex", "google_gemini", "google_agent_platform", "google_gemini_omni_1_1", "google_agent_platform_omni_1_1"] = "google_agent_platform"
     model: str
     status: Literal["idle", "submitting", "generating", "downloading", "complete", "cancelled", "failed"] = "idle"
     remoteJobId: str | None = None

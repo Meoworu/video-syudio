@@ -1,6 +1,6 @@
 # Development Plan: Gemini Omni 1.1 视频 API Key 接入
 
-日期：2026-10-22。状态：实现与离线验收完成；真实 Gemini API 联调待配置视频 Key。本方案接替现有视频 OAuth 接入设计；文字与首尾帧图片继续使用当前 Agent Platform 接入。
+日期：2026-10-22。状态：已被后续决策替代，仅保留历史记录。当前视频接入恢复为 Agent Platform OAuth ADC，请以 [Agent Platform 接入说明](agent-platform-api-key-development.md) 为准。
 
 ## 1. Requirement Understanding
 
