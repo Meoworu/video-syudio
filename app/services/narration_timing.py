@@ -11,6 +11,10 @@ _LATIN_WORD = re.compile(r"[A-Za-z0-9]+(?:['’-][A-Za-z0-9]+)?")
 _PACE = {"slow": 0.82, "natural": 1.0, "brisk": 1.08, "urgent": 1.15}
 
 
+class NarrationDurationError(ValueError):
+    """A valid narration cannot fit within the project's timeline."""
+
+
 def estimate_sentence_duration(sentence: NarrationSentence) -> float:
     cjk = len(_CJK.findall(sentence.text))
     latin = len(_LATIN_WORD.findall(sentence.text))
@@ -52,7 +56,7 @@ def align_narration(project: Project, sentences: list[NarrationSentence]) -> tup
         start = timeline_cursor
         end = start + duration
         if end > cursor + 1.5:
-            raise ValueError(f"旁白预计超出成片时长：{end:.1f}s / {cursor:.1f}s，请精简文案")
+            raise NarrationDurationError(f"旁白预计超出成片时长：{end:.1f}s / {cursor:.1f}s，请精简文案")
         start_shot = _shot_at(shot_starts, start)
         end_shot = _shot_at(shot_starts, max(start, end - 0.001))
         cues.append(NarrationCue(

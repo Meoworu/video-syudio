@@ -11,6 +11,7 @@ from typing import Any
 from app.clients.google_image import GoogleImageClient
 from app.config import Settings
 from app.domain.models import FrameJob, FrameVersion, Project, Shot
+from app.services.timeline_invalidation import invalidate_picture_timeline
 from app.services.asset_service import normalize_image, resolve_asset_references
 from app.services.image_generation_limits import image_generation_semaphore
 from app.services.project_type_policy import is_science, visual_constraint
@@ -153,7 +154,7 @@ class FrameService:
         slot.selectedVersionId = version.id
         setattr(shot.uploads, "firstFrame" if role == "first" else "lastFrame", version.path)
         shot.video = None
-        project.finalVideoPath = None
+        invalidate_picture_timeline(project)
 
     def _snapshot(self, project: Project, shot: Shot, role: str) -> dict[str, Any]:
         slot = shot.frames[role]
@@ -222,7 +223,7 @@ class FrameService:
             slot.job.errorMessage = None
             setattr(shot.uploads, "firstFrame" if role == "first" else "lastFrame", path)
             shot.video = None
-            project.finalVideoPath = None
+            invalidate_picture_timeline(project)
             self.store.save(project)
 
     def _fail(self, project_id: str, shot_id: str, role: str, job_id: str, message: str) -> None:

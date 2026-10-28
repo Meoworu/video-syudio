@@ -4,6 +4,8 @@ import json
 import time
 from typing import Any
 
+from google.genai import types
+
 from app.clients.google_client import build_google_client, safe_google_error
 from app.config import Settings
 
@@ -23,13 +25,16 @@ class GoogleTextClient:
             self._client = build_google_client(self.settings)
         return self._client
 
-    def generate_json(self, prompt: str) -> dict[str, Any]:
+    def generate_json(self, prompt: str, *, images: list[tuple[bytes, str]] | None = None) -> dict[str, Any]:
         last_error: Exception | None = None
         for attempt in range(self.settings.google_text_max_retries + 1):
             try:
                 response = self.client.models.generate_content(
                     model=self.settings.google_text_model,
-                    contents=prompt,
+                    contents=prompt if not images else [
+                        types.Part.from_text(text=prompt),
+                        *(types.Part.from_bytes(data=data, mime_type=mime) for data, mime in images),
+                    ],
                     config={"response_mime_type": "application/json"},
                 )
                 value = json.loads(getattr(response, "text", "") or "")

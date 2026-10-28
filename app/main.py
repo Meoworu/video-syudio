@@ -5,9 +5,11 @@ from fastapi import FastAPI
 from app.api.health import router as health_router
 from app.api.project_assets import router as asset_router
 from app.api.projects import router as project_router
+from app.api.timeline_narration import router as timeline_narration_router
 from app.config import get_settings
 from app.services.director_service import DirectorService
 from app.services.video_service import VideoService
+from app.services.media_job_service import touch_job
 from app.store.project_store import ProjectStore
 
 _RECOVERY_TASKS: set[asyncio.Task] = set()
@@ -20,6 +22,7 @@ app = FastAPI(
 )
 app.include_router(health_router, prefix="/v1")
 app.include_router(project_router, prefix="/v1")
+app.include_router(timeline_narration_router, prefix="/v1")
 app.include_router(asset_router, prefix="/v1")
 
 
@@ -28,6 +31,15 @@ async def resume_video_tasks() -> None:
     settings = get_settings()
     store = ProjectStore(settings.video_studio_data_dir)
     for project in store.list():
+        interrupted_jobs = [job.id for job in project.mediaJobs if job.status in {"queued", "running"}]
+        if interrupted_jobs:
+            with store.lock(project.projectId):
+                current = store.get(project.projectId)
+                for job in current.mediaJobs:
+                    if job.id in interrupted_jobs and job.status in {"queued", "running"}:
+                        touch_job(job, "interrupted", message="服务重启时任务中断；不会自动重新提交收费请求")
+                store.save(current)
+            project = store.get(project.projectId)
         if project.status == "generating" and project.directorRequest:
             task = asyncio.create_task(asyncio.to_thread(DirectorService(settings).run_project, project.projectId, store))
             _RECOVERY_TASKS.add(task)

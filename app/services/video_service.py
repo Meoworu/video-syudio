@@ -9,6 +9,7 @@ from app.clients.google_omni_video import GoogleOmniVideoCancelled, GoogleOmniVi
 from app.config import Settings
 from app.domain.models import Project, Shot, ShotVideo
 from app.services.project_type_policy import visual_constraint
+from app.services.timeline_invalidation import invalidate_picture_timeline
 from app.store.project_store import ProjectStore
 
 
@@ -136,6 +137,7 @@ class VideoService:
                     return
                 shot.video.status = "complete"
                 shot.video.path = str(output.relative_to(self.store.project_dir(project_id)))
+                invalidate_picture_timeline(project)
                 self.store.save(project)
         except GoogleOmniVideoCancelled:
             return

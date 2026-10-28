@@ -17,11 +17,13 @@ function Studio() {
   const workspace = useStudioWorkspace();
   const [mobileProjectsOpen, setMobileProjectsOpen] = useState(false);
   const project = workspace.selected;
+  const activeMediaTask = Boolean(project?.mediaJobs.some((job) => ["queued", "running"].includes(job.status)));
+  const pageBusy = workspace.busy || activeMediaTask;
   const navigation = <ProjectNavigation
     projects={workspace.projects}
     selectedId={workspace.selectedId}
     jobs={workspace.videoJobs}
-    busy={workspace.busy}
+    busy={pageBusy}
     loading={workspace.loadingProjects}
     onSelect={(id) => { void workspace.selectProject(id); setMobileProjectsOpen(false); }}
     onCreate={workspace.create}
@@ -34,8 +36,8 @@ function Studio() {
   />;
 
   const tabItems = project ? [
-    { key: "overview", label: "项目概览", children: <ProjectOverview project={project} busy={workspace.busy} onRetry={() => void workspace.actions.retryDirector(project.projectId)} /> },
-    { key: "assets", label: "资产", children: <AssetWorkspace project={project} busy={workspace.busy}
+    { key: "overview", label: "项目概览", children: <ProjectOverview project={project} busy={pageBusy} onRetry={() => void workspace.actions.retryDirector(project.projectId)} /> },
+    { key: "assets", label: "资产", children: <AssetWorkspace project={project} busy={pageBusy}
       onCreate={(payload) => workspace.actions.createAsset(project.projectId, payload)}
       onUpdate={(assetId, payload) => workspace.actions.updateAsset(project.projectId, assetId, payload)}
       onUpload={(assetId, file) => workspace.actions.uploadAssetImage(project.projectId, assetId, file)}
@@ -43,7 +45,7 @@ function Studio() {
       onDelete={(assetId) => workspace.actions.deleteAsset(project.projectId, assetId)}
     /> },
     { key: "shots", label: `分镜 · ${project.shots.length}`, children: <ShotWorkspace
-      project={project} busy={workspace.busy}
+      project={project} busy={pageBusy}
       onUpdate={(shotId, draft) => workspace.actions.updateShot(project.projectId, shotId, draft)}
       onUpload={(shotId, role, file) => workspace.actions.uploadFrame(project.projectId, shotId, role, file)}
       onGenerate={(shotId) => workspace.actions.generateVideo(project.projectId, shotId)}
@@ -57,13 +59,22 @@ function Studio() {
       onGenerateAll={() => workspace.actions.generateAllVideos(project.projectId)}
     /> },
     { key: "narration", label: "连续旁白", children: <NarrationPanel
-      project={project} busy={workspace.busy}
+      project={project} busy={pageBusy}
       onGenerate={() => workspace.actions.generateManuscript(project.projectId)}
       onSave={(manuscript) => workspace.actions.updateNarrationManuscript(project.projectId, manuscript)}
       onSynthesize={(speed) => workspace.actions.generateNarrationAudio(project.projectId, speed)}
       onSelectTake={(takeId) => workspace.actions.selectNarrationTake(project.projectId, takeId)}
+      onPlanWindows={() => workspace.actions.planNarrationWindows(project.projectId)}
+      onSaveWindows={(previewId, revision, windows) => workspace.actions.saveNarrationWindows(project.projectId, previewId, revision, windows)}
+      onGenerateWindowAudio={(previewId, revision, speed, windowIds, forceRegenerate) => workspace.actions.generateWindowNarrationAudio(
+        project.projectId, previewId, revision, speed, windowIds, forceRegenerate,
+      )}
     /> },
-    { key: "assembly", label: "成片", children: <FinalAssemblyPanel project={project} busy={workspace.busy} onAssemble={() => workspace.actions.assembleProject(project.projectId)} /> },
+    { key: "assembly", label: "成片", children: <FinalAssemblyPanel project={project} busy={pageBusy}
+      onCreatePreview={() => workspace.actions.createSilentPreview(project.projectId)}
+      onPlanWindows={() => workspace.actions.planNarrationWindows(project.projectId)}
+      onCancelJob={(jobId) => workspace.actions.cancelMediaJob(project.projectId, jobId)}
+      onAssemble={() => workspace.actions.assembleProject(project.projectId)} /> },
   ] : [];
 
   return <Layout className="studio-layout">
@@ -90,7 +101,7 @@ function Studio() {
           <div className="content-intro"><div><Typography.Text className="eyebrow">VIDEO PRODUCTION</Typography.Text><Typography.Title level={3}>{project.title}</Typography.Title></div><Typography.Text type="secondary">从导演大纲到最终成片，在一个工作区完成。</Typography.Text></div>
           <Tabs key={project.projectId} className="workspace-tabs" items={tabItems} />
         </> : <div className="welcome-panel">
-          <div className="welcome-copy"><Typography.Text className="eyebrow">AI VIDEO STUDIO</Typography.Text><Typography.Title>把故事，变成一部短片。</Typography.Title><Typography.Paragraph type="secondary">用 Google AI 设计分镜、生成首尾帧和视频，再用连续旁白与时间线完成剪辑。</Typography.Paragraph><Typography.Text type="secondary">从左侧新建项目，或选择一个已有项目继续制作。</Typography.Text></div>
+          <div className="welcome-copy"><Typography.Text className="eyebrow">AI VIDEO STUDIO</Typography.Text><Typography.Title>ChatGpt把需求变成具体代码。</Typography.Title><Typography.Paragraph type="secondary">用 Google AI 设计分镜、生成首尾帧和视频，再用连续旁白与时间线完成剪辑。</Typography.Paragraph><Typography.Text type="secondary">从左侧新建项目，或选择一个已有项目继续制作。</Typography.Text></div>
           <div className="welcome-steps"><div><span>01</span><Typography.Text strong>导演规划</Typography.Text><Typography.Text type="secondary">大纲 · 场景 · 镜头</Typography.Text></div><div><span>02</span><Typography.Text strong>画面与旁白</Typography.Text><Typography.Text type="secondary">生成素材 · 对齐时间</Typography.Text></div><div><span>03</span><Typography.Text strong>合成成片</Typography.Text><Typography.Text type="secondary">镜头 · 音轨 · 导出</Typography.Text></div></div>
           {!workspace.projects.length && <Empty className="welcome-empty" image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有项目，请从项目栏创建一个新项目。" />}
         </div>}

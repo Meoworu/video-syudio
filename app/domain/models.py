@@ -323,7 +323,90 @@ class NarrationTake(BaseModel):
     path: str
     durationSeconds: float = Field(gt=0)
     speed: float = Field(ge=0.5, le=2)
-    status: Literal["ready", "selected", "failed"] = "ready"
+    status: Literal["ready", "selected", "failed", "stale"] = "ready"
+    mode: Literal["legacy", "windowed"] = "legacy"
+    previewId: str | None = None
+    windowRevision: int | None = None
+    inputSignature: str = ""
+    segmentManifest: list[dict[str, Any]] = Field(default_factory=list)
+    voiceSnapshot: dict[str, Any] = Field(default_factory=dict)
+    auditionPath: str | None = None
+
+
+class PreviewClip(BaseModel):
+    shotId: str
+    shotIndex: int = Field(ge=0)
+    sourceDigest: str = ""
+    sourceIn: float = Field(ge=0)
+    sourceOut: float = Field(gt=0)
+    timelineStart: float = Field(ge=0)
+    timelineEnd: float = Field(gt=0)
+    overlapSeconds: float = Field(default=0, ge=0)
+
+
+class ProjectPreview(BaseModel):
+    id: str
+    path: str
+    durationSeconds: float = Field(gt=0)
+    fps: float = Field(default=24, gt=0)
+    inputSignature: str
+    clips: list[PreviewClip] = Field(default_factory=list)
+    evidenceFrames: list[dict[str, Any]] = Field(default_factory=list)
+    createdAt: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    status: Literal["ready", "stale"] = "ready"
+    job: dict[str, Any] = Field(default_factory=dict)
+
+
+class NarrationWindow(BaseModel):
+    id: str = Field(min_length=1, max_length=100, pattern=r"^[A-Za-z0-9_-]+$")
+    order: int = Field(ge=0)
+    previewId: str
+    startSeconds: float = Field(ge=0)
+    endSeconds: float = Field(gt=0)
+    sourceShotIds: list[str] = Field(default_factory=list)
+    visualSummary: str = ""
+    anchorNote: str = ""
+    evidenceFrameIds: list[str] = Field(default_factory=list)
+    text: str = Field(min_length=1, max_length=2000)
+    textLocked: bool = False
+    estimatedDurationSeconds: float | None = Field(default=None, gt=0)
+    status: Literal["draft", "ready", "generating", "complete", "needs_edit", "failed", "stale"] = "draft"
+
+
+class SegmentAudio(BaseModel):
+    id: str
+    windowId: str
+    inputSignature: str
+    rawPath: str
+    calibratedPath: str | None = None
+    measuredDurationSeconds: float = Field(gt=0)
+    calibratedDurationSeconds: float | None = Field(default=None, gt=0)
+    placedStartSeconds: float = Field(ge=0)
+    placedEndSeconds: float = Field(gt=0)
+    tempoFactor: float = Field(default=1, ge=1, le=1.15)
+    providerTraceId: str | None = None
+
+
+class MediaJob(BaseModel):
+    id: str
+    kind: Literal["preview", "windows", "audio", "export"]
+    requestId: str
+    status: Literal["queued", "running", "complete", "failed", "cancelled", "interrupted"] = "queued"
+    inputSnapshot: dict[str, Any] = Field(default_factory=dict)
+    inputSignature: str
+    progress: dict[str, Any] = Field(default_factory=dict)
+    errorCode: str | None = None
+    errorMessage: str | None = None
+    createdAt: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    updatedAt: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+
+class FinalRender(BaseModel):
+    path: str
+    previewId: str
+    narrationTakeId: str | None = None
+    inputSignature: str
+    isCurrent: bool = True
 
 
 class ShotUploads(BaseModel):
@@ -474,6 +557,10 @@ class Narration(BaseModel):
     takes: list[NarrationTake] = Field(default_factory=list)
     selectedTakeId: str | None = None
     status: Literal["idle", "draft", "audio_ready", "failed"] = "idle"
+    mode: Literal["legacy", "windowed"] = "legacy"
+    windowRevision: int = 0
+    windows: list[NarrationWindow] = Field(default_factory=list)
+    segmentAudios: list[SegmentAudio] = Field(default_factory=list)
 
 
 class Project(BaseModel):
@@ -495,6 +582,9 @@ class Project(BaseModel):
     shots: list[Shot] = Field(default_factory=list)
     narration: Narration = Field(default_factory=Narration)
     finalVideoPath: str | None = None
+    preview: ProjectPreview | None = None
+    finalRender: FinalRender | None = None
+    mediaJobs: list[MediaJob] = Field(default_factory=list)
     errorMessage: str | None = None
 
     @model_validator(mode="before")
@@ -575,4 +665,22 @@ class GenerateFrameRequest(BaseModel):
 
 class NarrationAudioRequest(BaseModel):
     speed: float = Field(default=1.0, ge=0.5, le=2.0)
+
+
+class MediaJobRequest(BaseModel):
+    requestId: str = Field(min_length=1, max_length=100)
+
+
+class SaveNarrationWindowsRequest(BaseModel):
+    previewId: str = Field(min_length=1, max_length=100)
+    expectedRevision: int = Field(ge=0)
+    windows: list[NarrationWindow] = Field(max_length=100)
+
+
+class NarrationWindowAudioRequest(MediaJobRequest):
+    speed: float = Field(default=1.0, ge=0.5, le=2.0)
+    previewId: str = Field(min_length=1, max_length=100)
+    expectedRevision: int = Field(ge=0)
+    windowIds: list[str] | None = Field(default=None, min_length=1, max_length=100)
+    forceRegenerate: bool = False
 

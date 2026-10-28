@@ -35,6 +35,7 @@ class MiniMaxSpeechClient:
         emotion: str = "neutral",
         speed: float = 1.0,
         model: str | None = None,
+        retry_transient_errors: bool = True,
     ) -> SpeechResult:
         if not text.strip():
             raise ValueError("旁白文本不能为空")
@@ -56,20 +57,21 @@ class MiniMaxSpeechClient:
             "audio_setting": {"format": "mp3", "sample_rate": 32000, "bitrate": 128000, "channel": 1},
         }
         response = None
-        for attempt in range(self.settings.minimax_max_retries + 1):
+        max_retries = self.settings.minimax_max_retries if retry_transient_errors else 0
+        for attempt in range(max_retries + 1):
             try:
                 response = self.client.post(
                     self.settings.minimax_speech_url,
                     headers={"Authorization": f"Bearer {self.settings.minimax_api_key}"},
                     json=payload,
                 )
-                if response.status_code in {408, 425, 429, 500, 502, 503, 504} and attempt < self.settings.minimax_max_retries:
+                if response.status_code in {408, 425, 429, 500, 502, 503, 504} and attempt < max_retries:
                     time.sleep(self.settings.retry_backoff_seconds * (2 ** attempt))
                     continue
                 response.raise_for_status()
                 break
             except httpx.TransportError:
-                if attempt >= self.settings.minimax_max_retries:
+                if attempt >= max_retries:
                     raise
                 time.sleep(self.settings.retry_backoff_seconds * (2 ** attempt))
         if response is None:

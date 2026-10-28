@@ -11,6 +11,7 @@ from app.domain.models import CreateAssetRequest, GenerateFrameRequest, Project,
 from app.services.asset_service import InvalidImageError, normalize_image, save_asset_image
 from app.services.asset_image_service import AssetImageService
 from app.services.frame_service import FrameService
+from app.services.media_job_service import active_media_job
 from app.store.project_store import ProjectStore
 
 
@@ -158,6 +159,8 @@ def update_frame_config(project_id: str, shot_id: str, role: str, payload: Updat
         raise HTTPException(status_code=400, detail="只支持 first 或 last 帧")
     with store.lock(project_id):
         project = _project(store, project_id)
+        if active_media_job(project):
+            raise HTTPException(status_code=409, detail="媒体任务执行中，暂不能修改首尾帧")
         shot = next((item for item in project.shots if item.id == shot_id), None)
         if not shot:
             raise HTTPException(status_code=404, detail="镜头不存在")
@@ -183,6 +186,8 @@ def generate_frame(project_id: str, shot_id: str, role: str, payload: GenerateFr
         raise HTTPException(status_code=400, detail="只支持 first 或 last 帧")
     with store.lock(project_id):
         project = _project(store, project_id)
+        if active_media_job(project):
+            raise HTTPException(status_code=409, detail="媒体任务执行中，暂不能生成首尾帧")
         shot = next((item for item in project.shots if item.id == shot_id), None)
         if not shot:
             raise HTTPException(status_code=404, detail="镜头不存在")
@@ -199,6 +204,8 @@ def generate_frame(project_id: str, shot_id: str, role: str, payload: GenerateFr
 def generate_frames(project_id: str, shot_id: str, payload: GenerateFrameRequest, background_tasks: BackgroundTasks, settings: Settings = Depends(get_settings), store: ProjectStore = Depends(get_store)) -> Project:
     with store.lock(project_id):
         project = _project(store, project_id)
+        if active_media_job(project):
+            raise HTTPException(status_code=409, detail="媒体任务执行中，暂不能生成首尾帧")
         shot = next((item for item in project.shots if item.id == shot_id), None)
         if not shot:
             raise HTTPException(status_code=404, detail="镜头不存在")
@@ -218,6 +225,8 @@ def select_frame_version(project_id: str, shot_id: str, role: str, version_id: s
         raise HTTPException(status_code=400, detail="只支持 first 或 last 帧")
     with store.lock(project_id):
         project = _project(store, project_id)
+        if active_media_job(project):
+            raise HTTPException(status_code=409, detail="媒体任务执行中，暂不能切换首尾帧版本")
         shot = next((item for item in project.shots if item.id == shot_id), None)
         if not shot:
             raise HTTPException(status_code=404, detail="镜头不存在")

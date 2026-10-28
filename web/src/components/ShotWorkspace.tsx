@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Alert, App, Button, Card, Collapse, Empty, Input, InputNumber, Popconfirm, Select, Space, Tag, Typography } from "antd";
+import { useEffect, useRef, useState } from "react";
+import { Alert, App, Button, Card, Collapse, Empty, Input, InputNumber, Popconfirm, Select, Space, Tabs, Tag, Typography } from "antd";
 import { fileUrl } from "../api";
 import type { Project, Shot } from "../types";
 import { FrameGenerationPanel } from "./FrameGenerationPanel";
@@ -150,12 +150,33 @@ export function ShotWorkspace({ project, busy, onUpdate, onUpload, onGenerate, o
   onDeleteFailedFrame: (shotId: string, role: "first" | "last") => Promise<Project | null>;
   onGenerateAll: () => Promise<Project | null>;
 }) {
+  const workspaceRef = useRef<HTMLDivElement>(null);
+  const [selection, setSelection] = useState({ projectId: project.projectId, shotId: project.shots[0]?.id });
+  const activeKey = selection.projectId === project.projectId && project.shots.some((shot) => shot.id === selection.shotId)
+    ? selection.shotId : project.shots[0]?.id;
   if (!project.shots.length) return <Empty description="导演正在整理镜头，完成后会显示在这里。" />;
   const readyCount = project.shots.filter((shot) => shot.uploads.firstFrame && shot.uploads.lastFrame && shot.video?.status !== "complete" && !activeStatuses.has(shot.video?.status || "")).length;
-  return <div className="shot-workspace">
+  return <div className="shot-workspace" ref={workspaceRef}>
     <div className="section-heading"><div><Typography.Title level={4}>分镜</Typography.Title><Typography.Text type="secondary">{project.shots.length} 个镜头 · {readyCount} 个可提交生成</Typography.Text></div>
       <Button type="primary" disabled={busy || readyCount === 0} loading={busy} onClick={() => void onGenerateAll()}>批量生成可提交镜头</Button>
     </div>
-    {project.shots.map((shot) => <ShotEditor key={`${project.projectId}-${shot.id}`} project={project} shot={shot} busy={busy} onUpdate={onUpdate} onUpload={onUpload} onGenerate={onGenerate} onCancel={onCancel} onDeleteFailedVideo={onDeleteFailedVideo} onFrameConfig={onFrameConfig} onGenerateFrame={onGenerateFrame} onGenerateFrames={onGenerateFrames} onSelectFrameVersion={onSelectFrameVersion} onDeleteFailedFrame={onDeleteFailedFrame} />)}
+    <Tabs key={project.projectId} className="shot-tabs" type="card" activeKey={activeKey} animated={false}
+      onChange={(shotId) => {
+        workspaceRef.current?.querySelectorAll("video").forEach((video) => video.pause());
+        setSelection({ projectId: project.projectId, shotId });
+      }}
+      items={project.shots.map((shot) => {
+        const complete = shot.video?.status === "complete" && Boolean(shot.video.path);
+        return {
+          key: shot.id,
+          label: <span className={`shot-tab-label${complete ? " is-complete" : ""}`}>
+            <span className="shot-tab-index">{String(shot.index + 1).padStart(2, "0")}</span>
+            <span className="shot-tab-title" title={shot.title}>{shot.title}</span>
+            {complete && <span className="shot-tab-status">✓ 已生成</span>}
+          </span>,
+          children: <ShotEditor project={project} shot={shot} busy={busy} onUpdate={onUpdate} onUpload={onUpload} onGenerate={onGenerate} onCancel={onCancel} onDeleteFailedVideo={onDeleteFailedVideo} onFrameConfig={onFrameConfig} onGenerateFrame={onGenerateFrame} onGenerateFrames={onGenerateFrames} onSelectFrameVersion={onSelectFrameVersion} onDeleteFailedFrame={onDeleteFailedFrame} />,
+        };
+      })}
+    />
   </div>;
 }

@@ -1,4 +1,4 @@
-import type { Project } from "./types";
+import type { NarrationWindow, Project } from "./types";
 
 const base = "/v1";
 
@@ -108,6 +108,28 @@ export function updateNarrationManuscript(projectId: string, manuscript: string)
 
 export function assembleProject(projectId: string) {
   return request<Project>(`/projects/${projectId}/assemble`, { method: "POST" });
+}
+
+export function createSilentPreview(projectId: string, requestId = crypto.randomUUID()) {
+  return request<Project>(`/projects/${projectId}/preview`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ requestId }) });
+}
+
+export function planNarrationWindows(projectId: string, requestId = crypto.randomUUID()) {
+  return request<Project>(`/projects/${projectId}/narration/windows/plan`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ requestId }) });
+}
+
+export function saveNarrationWindows(projectId: string, previewId: string, expectedRevision: number, windows: NarrationWindow[]) {
+  return request<Project>(`/projects/${projectId}/narration/windows`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ previewId, expectedRevision, windows }) });
+}
+
+export function generateWindowNarrationAudio(projectId: string, previewId: string, expectedRevision: number, speed = 1,
+  windowIds?: string[], forceRegenerate = false, requestId = crypto.randomUUID()) {
+  return request<Project>(`/projects/${projectId}/narration/window-audio`, { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ previewId, expectedRevision, speed, windowIds, forceRegenerate, requestId }) });
+}
+
+export function cancelMediaJob(projectId: string, jobId: string) {
+  return request<Project>(`/projects/${projectId}/media-jobs/${jobId}/cancel`, { method: "POST" });
 }
 
 export function updateShot(projectId: string, shotId: string, payload: { title?: string; prompt?: string; durationSeconds?: number; transitionIn?: string }) {

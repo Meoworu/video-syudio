@@ -68,6 +68,27 @@ export type ProductionScript = {
   styleBible: Record<string, string>;
 };
 
+export type NarrationWindow = {
+  id: string; order: number; previewId: string; startSeconds: number; endSeconds: number;
+  sourceShotIds: string[]; visualSummary: string; anchorNote: string; evidenceFrameIds: string[];
+  text: string; textLocked: boolean; estimatedDurationSeconds?: number | null;
+  status: "draft" | "ready" | "generating" | "complete" | "needs_edit" | "failed" | "stale";
+};
+
+export type MediaJob = {
+  id: string; kind: "preview" | "windows" | "audio" | "export"; requestId: string;
+  status: "queued" | "running" | "complete" | "failed" | "cancelled" | "interrupted";
+  inputSignature: string; progress: { completed?: number; total?: number; cancelRequested?: boolean };
+  errorCode?: string | null; errorMessage?: string | null;
+};
+
+export type ProjectPreview = {
+  id: string; path: string; durationSeconds: number; fps: number; inputSignature: string;
+  status: "ready" | "stale";
+  clips: { shotId: string; shotIndex: number; timelineStart: number; timelineEnd: number; sourceIn: number; sourceOut: number; overlapSeconds: number }[];
+  evidenceFrames: { id: string; timeSeconds: number; shotIds: string[]; relativePath: string }[];
+};
+
 export type Project = {
   projectId: string;
   title: string;
@@ -85,15 +106,20 @@ export type Project = {
   productionScript?: ProductionScript | null;
   editPlan: { shotIndex: number; timelineStart: number; timelineEnd: number; sourceIn: number; sourceOut: number; transitionIn: string; transitionReason: string }[];
   finalVideoPath?: string | null;
+  preview?: ProjectPreview | null;
+  finalRender?: { path: string; previewId: string; narrationTakeId?: string | null; inputSignature: string; isCurrent: boolean } | null;
+  mediaJobs: MediaJob[];
   shots: Shot[];
   narration: {
+    mode: "legacy" | "windowed"; windowRevision: number; windows: NarrationWindow[];
+    segmentAudios: { id: string; windowId: string; inputSignature: string; rawPath: string; calibratedPath?: string | null; measuredDurationSeconds: number; calibratedDurationSeconds?: number | null; placedStartSeconds: number; placedEndSeconds: number; tempoFactor: number; providerTraceId?: string | null }[];
     manuscript: string; voiceStyle: string; voiceDirection: string;
     sentences: { id: string; order: number; text: string; narrativeFunction: string; sourceShotIndexes: number[]; emotion: string; delivery: string; paceClass: string; pauseAfterSeconds: number; estimatedDurationSeconds?: number | null }[];
     alignment: { sentenceId: string; startSeconds: number; endSeconds: number; startShotIndex: number; endShotIndex: number; crossesShotBoundary: boolean }[];
     targetDurationSeconds?: number | null; estimatedDurationSeconds?: number | null;
     audioPath?: string | null; audioDurationSeconds?: number | null;
     timingWarning?: string | null;
-    takes: { id: string; path: string; durationSeconds: number; speed: number; status: string }[];
+    takes: { id: string; path: string; durationSeconds: number; speed: number; status: string; mode?: "legacy" | "windowed"; previewId?: string | null; windowRevision?: number | null; auditionPath?: string | null }[];
     selectedTakeId?: string | null; status: string;
   };
 };

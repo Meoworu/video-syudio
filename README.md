@@ -8,13 +8,13 @@ The project is intentionally independent from `comfyui-worker`.
 
 - Google Cloud Agent Platform API: director planning, narration manuscript, frames, and Omni video generation.
 - MiniMax Speech: continuous narration audio only.
-- Local FFmpeg/ffprobe: validates generated clips and assembles ordered shots with the MiniMax narration track.
+- Local FFmpeg/ffprobe: measures generated clips, renders a silent preview first, places separately measured MiniMax narration segments on picture-based time windows, and exports the matching version.
 
 The web app is served separately during development; Vite proxies `/v1` to the API on port 8010. Uploaded assets and frames, generated clips, narration audio, and the assembled `final/final.mp4` are available through the project files API. Install FFmpeg and ffprobe on the host before assembling a project.
 
 If FFmpeg is not on `PATH`, set `FFMPEG_BIN` and `FFPROBE_BIN` in `.env` to their executable paths.
 
-The director preserves the submitted story as-is, breaks it into source-linked production scenes, then plans shots against both the original text and the breakdown. It does not create a rewritten synopsis or change the project story. Each new shot shows its source excerpt. The continuous narration is sentence-based, aligned deterministically to the edit timeline, and voiced only with MiniMax Speech. Text and image generation use a service-account-bound Google Cloud API key through Agent Platform. Omni video uses the Agent Platform Interactions API, the `gemini-omni-1.1-flash-preview` model, and Google Cloud OAuth credentials (ADC), so eligible usage can draw from the linked Cloud billing account. See [the acceptance runbook](docs/acceptance-runbook.md) for setup and joint testing.
+The director preserves the submitted story as-is, breaks it into source-linked production scenes, then plans shots against both the original text and the breakdown. It does not create a rewritten synopsis or change the project story. Each new shot shows its source excerpt. New projects can use the picture-window narration workflow: render and measure a silent edit, inspect real timestamped frames, confirm semantic narration windows, measure each MiniMax segment, and place it at an absolute timestamp. Older projects retain the legacy continuous narration workflow. Text and image generation use a service-account-bound Google Cloud API key through Agent Platform. Omni video uses the Agent Platform Interactions API, the `gemini-omni-1.1-flash-preview` model, and Google Cloud OAuth credentials (ADC), so eligible usage can draw from the linked Cloud billing account. See [the acceptance runbook](docs/acceptance-runbook.md) for setup and joint testing.
 
 ## Local setup
 

@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import subprocess
 from pathlib import Path
 
 from app.config import Settings
-from app.domain.models import Project
+from app.domain.models import FinalRender, Project
 from app.store.project_store import ProjectStore
 from app.services.editing import TRANSITION_OVERLAP_SECONDS
+from app.services.media_probe import probe_media
 
 
 class AssemblyService:
@@ -16,6 +18,8 @@ class AssemblyService:
         self.store = store
 
     def assemble(self, project: Project) -> Project:
+        if project.narration.mode == "windowed":
+            raise ValueError("分段旁白项目必须使用对应的剪辑预览导出")
         root = self.store.project_dir(project.projectId).resolve()
         shots_by_index = {shot.index: shot for shot in project.shots}
         clips = sorted(project.editPlan, key=lambda item: float(item.get("timelineStart", 0))) if project.editPlan else [
@@ -108,8 +112,51 @@ class AssemblyService:
             partial.unlink(missing_ok=True)
             raise
         project.finalVideoPath = str(output.relative_to(root))
+        project.finalRender = None
         self.store.save(project)
         return project
+
+    def assemble_windowed(self, project: Project) -> FinalRender:
+        preview = project.preview
+        narration = project.narration
+        take = next((item for item in narration.takes if item.id == narration.selectedTakeId), None)
+        if not preview or preview.status != "ready":
+            raise ValueError("请先生成有效的无旁白剪辑预览")
+        if not take or take.status != "selected" or take.mode != "windowed":
+            raise ValueError("请先完成并选择分段旁白音轨")
+        if take.previewId != preview.id or take.windowRevision != narration.windowRevision:
+            raise ValueError("当前旁白版本与剪辑预览不匹配，请重新配音")
+        root = self.store.project_dir(project.projectId).resolve()
+        video = self._project_file(root, preview.path)
+        audio = self._project_file(root, take.path)
+        preview_info = self._probe(video)
+        audio_info = probe_media(audio, self.settings.ffprobe_bin)
+        if not audio_info.has_audio:
+            raise ValueError("分段旁白文件缺少音频流")
+        if "audio" in {item.get("codec_type") for item in preview_info.get("streams", [])}:
+            raise ValueError("剪辑预览必须是不含音频的视频")
+        if abs(audio_info.duration_seconds - preview.durationSeconds) > 0.05:
+            raise ValueError("分段旁白音轨时长与剪辑预览不一致")
+        signature = hashlib.sha256(f"{preview.inputSignature}:{take.inputSignature}:{narration.windowRevision}".encode()).hexdigest()
+        output = root / "final" / f"windowed_{take.id}.mp4"
+        partial = output.with_name(f".{output.stem}.part.mp4")
+        output.parent.mkdir(parents=True, exist_ok=True)
+        args = [self.settings.ffmpeg_bin, "-hide_banner", "-loglevel", "error", "-y", "-i", str(video), "-i", str(audio),
+                "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+                "-t", f"{preview.durationSeconds:.6f}", "-movflags", "+faststart", "-f", "mp4", str(partial)]
+        try:
+            result = subprocess.run(args, capture_output=True, text=True, check=False, timeout=self.settings.preview_render_timeout_seconds)
+            if result.returncode:
+                raise RuntimeError(f"FFmpeg 封装最终成片失败：{result.stderr[-1200:]}")
+            muxed = self._probe(partial, require_audio=True)
+            if abs(float(muxed["format"]["duration"]) - preview.durationSeconds) > 0.12:
+                raise RuntimeError("最终成片时长与剪辑预览不一致")
+            partial.replace(output)
+        except Exception:
+            partial.unlink(missing_ok=True)
+            raise
+        return FinalRender(path=str(output.relative_to(root)), previewId=preview.id, narrationTakeId=take.id,
+                           inputSignature=signature, isCurrent=True)
 
     def _project_file(self, root: Path, relative_path: str | None) -> Path:
         if not relative_path:

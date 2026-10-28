@@ -3,10 +3,11 @@ from __future__ import annotations
 import mimetypes
 import uuid
 
-from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 
+from app.clients.google_text import GoogleTextError
 from app.config import Settings, get_settings
 from app.domain.models import CreateProjectRequest, FrameVersion, Project, ShotVideo, UpdateShotRequest
 from app.services.director_service import DirectorService
@@ -14,6 +15,8 @@ from app.services.assembly_service import AssemblyService
 from app.services.editing import rebuild_edit_plan
 from app.services.narration_service import NarrationService
 from app.services.video_service import VideoService
+from app.services.media_job_service import active_media_job, enqueue_media_job, run_export_job, signature
+from app.services.timeline_invalidation import invalidate_picture_timeline
 from app.store.project_store import ProjectStore
 
 
@@ -71,6 +74,8 @@ def delete_project(project_id: str, store: ProjectStore = Depends(get_store)) ->
             ) for shot in project.shots
         ) or any(asset.imageJob and asset.imageJob.status in {"queued", "generating"} for asset in project.assets):
             raise HTTPException(status_code=409, detail="项目仍有运行中的任务，请完成或取消任务后再删除")
+        if active_media_job(project):
+            raise HTTPException(status_code=409, detail="项目仍有运行中的媒体任务，请完成或取消任务后再删除")
         try:
             store.delete_project(project_id)
         except FileNotFoundError as error:
@@ -108,7 +113,7 @@ def get_project_file(project_id: str, relative_path: str, store: ProjectStore = 
         root = store.project_dir(project_id).resolve()
     except ValueError as error:
         raise HTTPException(status_code=400, detail="项目 ID 无效") from error
-    if relative_path.split("/", 1)[0] not in {"assets", "frames", "videos", "audio", "final"}:
+    if relative_path.split("/", 1)[0] not in {"assets", "frames", "videos", "audio", "final", "previews"}:
         raise HTTPException(status_code=404, detail="文件不存在")
     path = (root / relative_path).resolve()
     if root not in path.parents or not path.is_file():
@@ -157,6 +162,8 @@ async def upload_frame(
     def persist_frame() -> dict[str, str]:
         with store.lock(project_id):
             project = get_project(project_id, store)
+            if active_media_job(project):
+                raise HTTPException(status_code=409, detail="媒体任务执行中，暂不能替换首尾帧")
             shot = next((item for item in project.shots if item.id == shot_id), None)
             if not shot:
                 raise HTTPException(status_code=404, detail="镜头不存在")
@@ -172,7 +179,7 @@ async def upload_frame(
             slot.selectedVersionId = version_id
             setattr(shot.uploads, f"{role}Frame", relative_path)
             shot.video = None
-            project.finalVideoPath = None
+            invalidate_picture_timeline(project)
             store.save(project)
             return {"projectId": project_id, "shotId": shot_id, "role": role, "path": relative_path}
 
@@ -186,7 +193,17 @@ def generate_narration_manuscript(
     store: ProjectStore = Depends(get_store),
 ) -> Project:
     with store.lock(project_id):
-        return NarrationService(settings, store).generate_manuscript(get_project(project_id, store))
+        project = get_project(project_id, store)
+        if active_media_job(project):
+            raise HTTPException(status_code=409, detail="媒体任务执行中，暂不能生成旁白文稿")
+        if project.narration.mode == "windowed":
+            raise HTTPException(status_code=409, detail="此项目已使用分段旁白，请在画面时间窗中编辑")
+        try:
+            return NarrationService(settings, store).generate_manuscript(project)
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        except GoogleTextError as error:
+            raise HTTPException(status_code=502, detail=str(error)) from error
 
 
 @router.post("/{project_id}/narration/audio", response_model=Project)
@@ -197,7 +214,12 @@ def generate_narration_audio(
     store: ProjectStore = Depends(get_store),
 ) -> Project:
     with store.lock(project_id):
-        return NarrationService(settings, store).synthesize_audio(get_project(project_id, store), speed=speed)
+        project = get_project(project_id, store)
+        if active_media_job(project):
+            raise HTTPException(status_code=409, detail="媒体任务执行中，暂不能生成整段旁白")
+        if project.narration.mode == "windowed":
+            raise HTTPException(status_code=409, detail="此项目已使用分段旁白，请在画面时间窗中生成音频")
+        return NarrationService(settings, store).synthesize_audio(project, speed=speed)
 
 
 @router.post("/{project_id}/narration/takes/{take_id}/select", response_model=Project)
@@ -209,6 +231,16 @@ def select_narration_take(
 ) -> Project:
     with store.lock(project_id):
         project = get_project(project_id, store)
+        if active_media_job(project):
+            raise HTTPException(status_code=409, detail="媒体任务执行中，暂不能切换旁白版本")
+        if project.narration.mode == "windowed":
+            take = next((item for item in project.narration.takes if item.id == take_id), None)
+            if not take or take.mode != "windowed" or not project.preview or take.previewId != project.preview.id or take.windowRevision != project.narration.windowRevision:
+                raise HTTPException(status_code=409, detail="不能选择与当前时间窗或剪辑预览不匹配的音轨")
+        else:
+            take = next((item for item in project.narration.takes if item.id == take_id), None)
+            if take and (take.mode != "legacy" or take.status == "stale"):
+                raise HTTPException(status_code=409, detail="该旁白版本已过期或不属于当前旁白模式")
         try:
             return NarrationService(settings, store).select_take(project, take_id)
         except ValueError as error:
@@ -226,6 +258,10 @@ def update_narration_manuscript(
 ) -> Project:
     with store.lock(project_id):
         project = get_project(project_id, store)
+        if active_media_job(project):
+            raise HTTPException(status_code=409, detail="媒体任务执行中，暂不能修改旁白文稿")
+        if project.narration.mode == "windowed":
+            raise HTTPException(status_code=409, detail="此项目已使用分段旁白，请在画面时间窗中编辑")
         try:
             return NarrationService(settings, store).update_manuscript(project, manuscript)
         except ValueError as error:
@@ -242,6 +278,8 @@ def generate_video(
 ) -> Project:
     with store.lock(project_id):
         project = get_project(project_id, store)
+        if active_media_job(project):
+            raise HTTPException(status_code=409, detail="媒体任务执行中，暂不能提交视频生成")
         shot = next((item for item in project.shots if item.id == shot_id), None)
         if shot is None:
             raise HTTPException(status_code=404, detail="镜头不存在")
@@ -252,6 +290,7 @@ def generate_video(
         if any(shot.frames[role].job and shot.frames[role].job.status in {"queued", "generating"} for role in ("first", "last")):
             raise HTTPException(status_code=409, detail="首尾帧生成期间不能提交视频任务")
         try:
+            invalidate_picture_timeline(project)
             VideoService(settings, store).mark_submitting(project, shot)
         except ValueError as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
@@ -268,6 +307,8 @@ def update_shot(
 ) -> Project:
     with store.lock(project_id):
         project = get_project(project_id, store)
+        if active_media_job(project):
+            raise HTTPException(status_code=409, detail="媒体任务执行中，暂不能修改镜头时间线")
         shot = next((item for item in project.shots if item.id == shot_id), None)
         if not shot:
             raise HTTPException(status_code=404, detail="镜头不存在")
@@ -281,7 +322,7 @@ def update_shot(
         for key, value in changes.items():
             setattr(shot, key, value)
         shot.video = None
-        project.finalVideoPath = None
+        invalidate_picture_timeline(project)
         rebuild_edit_plan(project)
         if project.narration.sentences:
             from app.services.narration_timing import align_narration
@@ -315,6 +356,8 @@ def generate_all_videos(
         raise HTTPException(status_code=409, detail=str(error)) from error
     with store.lock(project_id):
         project = get_project(project_id, store)
+        if active_media_job(project):
+            raise HTTPException(status_code=409, detail="媒体任务执行中，暂不能重新生成镜头视频")
         pending = []
         for shot in project.shots:
             if not shot.uploads.firstFrame or not shot.uploads.lastFrame:
@@ -327,7 +370,7 @@ def generate_all_videos(
             pending.append(shot.id)
         if not pending:
             raise HTTPException(status_code=409, detail="没有可提交的视频镜头；请检查首尾帧和任务状态")
-        project.finalVideoPath = None
+        invalidate_picture_timeline(project)
         store.save(project)
         background_tasks.add_task(video_service.run_batch, project_id, pending)
         return project
@@ -372,6 +415,7 @@ def delete_failed_video(
             if video_path.is_file():
                 video_path.unlink()
         shot.video = None
+        invalidate_picture_timeline(project)
         store.save(project)
         return project
 
@@ -387,9 +431,28 @@ def list_videos(store: ProjectStore = Depends(get_store)) -> list[dict[str, obje
 
 
 @router.post("/{project_id}/assemble", response_model=Project)
-def assemble_project(project_id: str, settings: Settings = Depends(get_settings), store: ProjectStore = Depends(get_store)) -> Project:
+def assemble_project(project_id: str, background_tasks: BackgroundTasks, response: Response,
+                     settings: Settings = Depends(get_settings), store: ProjectStore = Depends(get_store)) -> Project:
     with store.lock(project_id):
         project = get_project(project_id, store)
+        if active_media_job(project):
+            raise HTTPException(status_code=409, detail="已有媒体任务执行中")
+        if project.narration.mode == "windowed":
+            if not project.preview or not project.narration.selectedTakeId:
+                raise HTTPException(status_code=409, detail="请先完成无旁白预览和分段配音")
+            inputs = {"previewId": project.preview.id, "takeId": project.narration.selectedTakeId,
+                      "revision": project.narration.windowRevision}
+            try:
+                job, created = enqueue_media_job(project, kind="export", request_id=f"export-{uuid.uuid4().hex}",
+                                                 snapshot={"project": project.model_dump(mode="json")},
+                                                 input_signature=signature(inputs))
+            except ValueError as error:
+                raise HTTPException(status_code=409, detail=str(error)) from error
+            store.save(project)
+            response.status_code = 202
+            if created:
+                background_tasks.add_task(run_export_job, project_id, job.id, settings, store)
+            return project
         try:
             return AssemblyService(settings, store).assemble(project)
         except (ValueError, RuntimeError, FileNotFoundError) as error:

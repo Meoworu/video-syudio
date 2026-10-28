@@ -3,8 +3,9 @@ import {
   assembleProject, cancelVideo, createAsset, createProject, deleteAsset, deleteFailedFrameJob, deleteFailedVideo, deleteProject, generateAllVideos,
   generateAssetImage, generateFrame, generateFrames, generateManuscript, generateNarrationAudio, generateVideo, getProject, listProjects, listVideoJobs,
   ApiError, retryDirector, selectFrameVersion, selectNarrationTake, updateAsset, updateFrameConfig, updateNarrationManuscript, updateShot, uploadAssetImage, uploadFrame,
+  cancelMediaJob, createSilentPreview, generateWindowNarrationAudio, planNarrationWindows, saveNarrationWindows,
 } from "../api";
-import type { Project, Shot } from "../types";
+import type { NarrationWindow, Project, Shot } from "../types";
 
 export type CreateProjectInput = { story: string; projectType: "story" | "science"; aspectRatio: "9:16" | "16:9"; style: string; sceneCount: number };
 
@@ -228,6 +229,32 @@ export function useStudioWorkspace() {
     deleteFailedFrameJob: (projectId: string, shotId: string, role: "first" | "last") => run(() => deleteFailedFrameJob(projectId, shotId, role)),
     generateAllVideos: (projectId: string) => run(() => generateAllVideos(projectId)),
     assembleProject: (projectId: string) => run(() => assembleProject(projectId)),
+    createSilentPreview: (projectId: string) => run(() => createSilentPreview(projectId)),
+    planNarrationWindows: (projectId: string) => run(() => planNarrationWindows(projectId)),
+    saveNarrationWindows: async (projectId: string, previewId: string, expectedRevision: number, windows: NarrationWindow[]) => {
+      const selectionVersion = selectionVersionRef.current;
+      pendingActionsRef.current += 1;
+      setBusy(true);
+      setError("");
+      try {
+        const project = await saveNarrationWindows(projectId, previewId, expectedRevision, windows);
+        dataVersionRef.current += 1;
+        if (selectionVersion === selectionVersionRef.current && projectId === selectedIdRef.current) setSelected(project);
+        await refresh();
+        return project;
+      } catch (cause) {
+        if (selectionVersion === selectionVersionRef.current) setError(cause instanceof Error ? cause.message : String(cause));
+        throw cause;
+      } finally {
+        pendingActionsRef.current -= 1;
+        setBusy(pendingActionsRef.current > 0);
+      }
+    },
+    generateWindowNarrationAudio: (projectId: string, previewId: string, expectedRevision: number, speed: number,
+      windowIds?: string[], forceRegenerate = false) => run(() => generateWindowNarrationAudio(
+        projectId, previewId, expectedRevision, speed, windowIds, forceRegenerate,
+      )),
+    cancelMediaJob: (projectId: string, jobId: string) => run(() => cancelMediaJob(projectId, jobId)),
   };
 
   return { projects, selected, selectedId, videoJobs, busy, error, setError, loadingProjects, loadingProject, refresh, selectProject, create, removeProject, run, actions };

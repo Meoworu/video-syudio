@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     minimax_max_retries: int = Field(default=2, ge=0, le=5, alias="MINIMAX_MAX_RETRIES")
     ffmpeg_bin: str = Field(default="ffmpeg", alias="FFMPEG_BIN")
     ffprobe_bin: str = Field(default="ffprobe", alias="FFPROBE_BIN")
+    preview_render_timeout_seconds: float = Field(default=900.0, gt=0, alias="PREVIEW_RENDER_TIMEOUT_SECONDS")
+    narration_time_windows_enabled: bool = Field(default=True, alias="NARRATION_TIME_WINDOWS_ENABLED")
+    narration_tts_max_concurrency: int = Field(default=1, ge=1, le=1, alias="NARRATION_TTS_MAX_CONCURRENCY")
+    narration_max_audio_tempo: float = Field(default=1.08, ge=1.0, le=1.15, alias="NARRATION_MAX_AUDIO_TEMPO")
 
     @field_validator("google_cloud_project")
     @classmethod

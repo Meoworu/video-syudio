@@ -9,7 +9,7 @@ from app.clients.google_text import GoogleTextClient
 from app.clients.minimax_speech import MiniMaxSpeechClient
 from app.config import Settings
 from app.domain.models import NarrationSentence, NarrationTake, Project
-from app.services.narration_timing import align_narration, split_manuscript
+from app.services.narration_timing import NarrationDurationError, align_narration, split_manuscript
 from app.services.editing import project_duration
 from app.services.project_type_policy import is_science
 from app.store.project_store import ProjectStore
@@ -46,24 +46,39 @@ class NarrationService:
             "句子按完整叙事顺序连续推进，允许一句跨越多个镜头，不允许为了镜头切换制造停顿。"
             "不得新增输入故事之外的人物、事实或因果；句子需完整并以。！？结束。"
             f"旁白自然朗读目标约 {target:.1f} 秒，视频全长 {video_duration:.1f} 秒。"
+            f"含句间停顿在内按目标时长控制篇幅，中文建议不超过 {max(1, int(target * 3.2))} 字。"
+            "本地按自然语速每秒约3.8个汉字或2.6个英文单词估算，并计入标点和句间停顿；不要靠加速或删除标点凑时长。"
             "只返回 JSON："
             '{"voiceStyle":"声音风格","voiceDirection":"表演指导", "sentences":[{"id":"narration_000",'
             '"order":0,"text":"完整句。","narrativeFunction":"叙事功能","sourceShotIndexes":[0],'
             '"emotion":"情绪","delivery":"表达方式","paceClass":"natural","pauseAfterSeconds":0.2}]}。'
             f"\n用户原文（保持原样）：{project.story}\n{context_label}：{json.dumps(story_context, ensure_ascii=False)}\n分镜：\n{shot_context}"
         )
-        result = self.text_client.generate_json(prompt)
-        raw_sentences = result.get("sentences")
-        if not isinstance(raw_sentences, list) or not raw_sentences:
-            manuscript = str(result.get("manuscript") or "").strip()
-            sentences = split_manuscript(manuscript)
-        else:
-            sentences = [NarrationSentence.model_validate(item) for item in raw_sentences]
-        if not sentences:
-            raise ValueError("Google 未返回有效的连续旁白文案")
-        if [item.order for item in sentences] != list(range(len(sentences))):
-            raise ValueError("Google 返回的旁白句子顺序不连续")
-        sentences, cues, target, estimated = align_narration(project, sentences)
+        for attempt in range(2):
+            result = self.text_client.generate_json(prompt)
+            raw_sentences = result.get("sentences")
+            if not isinstance(raw_sentences, list) or not raw_sentences:
+                manuscript = str(result.get("manuscript") or "").strip()
+                sentences = split_manuscript(manuscript)
+            else:
+                sentences = [NarrationSentence.model_validate(item) for item in raw_sentences]
+            if not sentences:
+                raise ValueError("Google 未返回有效的连续旁白文案")
+            if [item.order for item in sentences] != list(range(len(sentences))):
+                raise ValueError("Google 返回的旁白句子顺序不连续")
+            try:
+                sentences, cues, target, estimated = align_narration(project, sentences)
+            except NarrationDurationError as error:
+                if attempt:
+                    raise
+                prompt += (
+                    f"\n上一次生成的旁白未通过本地时长校验：{error}。"
+                    f"请精简下列旁白至含停顿约 {target:.1f} 秒，减少重复和次要描述，保持完整句与原文事实。"
+                    "仅修改生成的旁白，不修改用户原文；不要通过加快paceClass或减少必要停顿规避篇幅限制。"
+                    f"仍按原JSON结构返回。上一次结果：{json.dumps(result, ensure_ascii=False)}"
+                )
+                continue
+            break
         manuscript = "".join(item.text for item in sentences)
         project.narration.manuscript = manuscript
         project.narration.voiceStyle = str(result.get("voiceStyle") or "自然、克制、清晰的电影旁白")
@@ -122,6 +137,8 @@ class NarrationService:
         )
         project.narration.status = "audio_ready"
         project.finalVideoPath = None
+        if project.finalRender:
+            project.finalRender.isCurrent = False
         self.store.save(project)
         return project
 
@@ -144,6 +161,8 @@ class NarrationService:
             take.status = "ready"
         project.narration.status = "draft"
         project.finalVideoPath = None
+        if project.finalRender:
+            project.finalRender.isCurrent = False
         self.store.save(project)
         return project
 
@@ -151,6 +170,8 @@ class NarrationService:
         take = next((item for item in project.narration.takes if item.id == take_id), None)
         if take is None:
             raise ValueError("旁白版本不存在")
+        if take.status == "stale":
+            raise ValueError("此旁白版本对应的画面时间线已过期")
         path = self.store.project_dir(project.projectId) / take.path
         if not path.is_file():
             raise FileNotFoundError(take.path)
@@ -162,6 +183,8 @@ class NarrationService:
         project.narration.timingWarning = None
         project.narration.status = "audio_ready"
         project.finalVideoPath = None
+        if project.finalRender:
+            project.finalRender.isCurrent = False
         self.store.save(project)
         return project
 
